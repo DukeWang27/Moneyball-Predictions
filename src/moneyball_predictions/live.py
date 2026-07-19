@@ -15,7 +15,11 @@ from .mlb import (
     fetch_mlb_schedule,
     fetch_team_season_stats,
 )
-from .model import log5_probability, pythagorean_expectation
+from .model import (
+    add_home_field_advantage,
+    log5_probability,
+    regressed_pythagorean_expectation,
+)
 from .odds import prediction_market_expected_value, prediction_market_kelly_stake
 from .polymarket import (
     MarketDiagnostic,
@@ -243,7 +247,7 @@ async def build_live_mlb_predictions(
     start_date = now_eastern.date()
     end_date = start_date + timedelta(days=max(days, 1) - 1)
     timeout = httpx.Timeout(20.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.3.1 research-dashboard"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.5.0 research-dashboard"}
     runtime_counts: Counter[str] = Counter()
 
     try:
@@ -254,6 +258,7 @@ async def build_live_mlb_predictions(
         ) as client:
             markets, market_diagnostics = await fetch_mlb_moneyline_markets(client)
             team_stats = await fetch_team_season_stats(client, resolved_season)
+            prior_team_stats = await fetch_team_season_stats(client, resolved_season - 1)
             schedule = await fetch_mlb_schedule(client, start_date, end_date)
 
             market_to_game: dict[str, MlbGameState] = {}
@@ -302,17 +307,57 @@ async def build_live_mlb_predictions(
             runtime_counts["no_schedule_match"] += 1
             continue
 
-        strength_a = pythagorean_expectation(
-            stats_a.runs_scored,
-            stats_a.runs_allowed,
-            stats_a.games_played,
+        prior_a = prior_team_stats.get(market.team_a)
+        prior_b = prior_team_stats.get(market.team_b)
+        prior_values = list(prior_team_stats.values())
+        prior_league_runs = (
+            sum(item.runs_scored for item in prior_values)
+            / sum(item.games_played for item in prior_values)
+            if prior_values and sum(item.games_played for item in prior_values) > 0
+            else 4.5
         )
-        strength_b = pythagorean_expectation(
-            stats_b.runs_scored,
-            stats_b.runs_allowed,
-            stats_b.games_played,
+        prior_a_rs = (
+            prior_a.runs_scored / prior_a.games_played
+            if prior_a and prior_a.games_played
+            else prior_league_runs
         )
-        probability_a = log5_probability(strength_a, strength_b)
+        prior_a_ra = (
+            prior_a.runs_allowed / prior_a.games_played
+            if prior_a and prior_a.games_played
+            else prior_league_runs
+        )
+        prior_b_rs = (
+            prior_b.runs_scored / prior_b.games_played
+            if prior_b and prior_b.games_played
+            else prior_league_runs
+        )
+        prior_b_ra = (
+            prior_b.runs_allowed / prior_b.games_played
+            if prior_b and prior_b.games_played
+            else prior_league_runs
+        )
+        strength_a = regressed_pythagorean_expectation(
+            runs_scored=stats_a.runs_scored,
+            runs_allowed=stats_a.runs_allowed,
+            games_played=stats_a.games_played,
+            prior_runs_scored_per_game=prior_a_rs,
+            prior_runs_allowed_per_game=prior_a_ra,
+            league_runs_per_team_game=prior_league_runs,
+        )
+        strength_b = regressed_pythagorean_expectation(
+            runs_scored=stats_b.runs_scored,
+            runs_allowed=stats_b.runs_allowed,
+            games_played=stats_b.games_played,
+            prior_runs_scored_per_game=prior_b_rs,
+            prior_runs_allowed_per_game=prior_b_ra,
+            league_runs_per_team_game=prior_league_runs,
+        )
+        neutral_a = log5_probability(strength_a, strength_b)
+        if market.team_a == official_game.home_team:
+            probability_a = add_home_field_advantage(neutral_a, 0.54)
+        else:
+            probability_b_home = add_home_field_advantage(1.0 - neutral_a, 0.54)
+            probability_a = 1.0 - probability_b_home
         probability_b = 1.0 - probability_a
 
         book_a = books.get(market.token_a)
@@ -418,7 +463,7 @@ async def build_live_mlb_predictions(
 async def build_single_scoreboard_game(game_pk: int) -> ScoreboardGame:
     """Fetch one game for resolving a locally stored paper bet."""
     timeout = httpx.Timeout(15.0, connect=8.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.3.1 paper-settlement"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.5.0 paper-settlement"}
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             game = await fetch_mlb_game(client, game_pk)

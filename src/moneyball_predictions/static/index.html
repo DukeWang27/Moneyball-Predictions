@@ -73,6 +73,16 @@
     .error { color: #ff969a; background: #251117; border: 1px solid #62313c; border-radius: 12px; padding: 14px; white-space: pre-wrap; }
     .notice { padding: 16px; border: 1px solid #2d3b50; border-radius: 13px; color: #9eadc0; line-height: 1.55; }
     details { margin-top: 18px; color: #8f9bad; }
+    .inline-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+    .inline-controls label { margin: 0; min-width: 120px; }
+    .inline-controls input { margin: 6px 0 0; }
+    .metric-word { color: #6f7f94; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; }
+    .table-wrap { overflow-x: auto; border: 1px solid #282f3c; border-radius: 13px; }
+    table { width: 100%; border-collapse: collapse; min-width: 620px; }
+    th, td { padding: 11px 13px; border-bottom: 1px solid #252c38; text-align: left; font-size: 13px; }
+    th { color: #8f9bad; font-weight: 700; }
+    tr:last-child td { border-bottom: 0; }
+    .history-note { margin-top: 10px; color: #8491a4; font-size: 12px; line-height: 1.5; }
     footer { color: #6f7f94; margin-top: 34px; font-size: 13px; line-height: 1.6; }
     @media (max-width: 980px) {
       .market-row { grid-template-columns: 80px 1fr; }
@@ -92,9 +102,9 @@
 <main>
   <div class="topbar">
     <section>
-      <div class="eyebrow">MLB · chronological Polymarket board · v0.3.1</div>
-      <h1>Games in first-pitch order. Kelly-sized signals.</h1>
-      <p class="lede">The market board is grouped by day and sorted by the official MLB start time. Each matchup shows the two executable Polymarket asks side by side, plus the model edge and a bankroll-based Kelly stake.</p>
+      <div class="eyebrow">MLB · Polymarket board + model lab · v0.5.0</div>
+      <h1>Live markets, saved paper bets, and honest model comparison.</h1>
+      <p class="lede">Games stay in official first-pitch order. The model lab compares the old formula with a prior-regressed, home-adjusted, past-only calibrated version without letting any game see its own result.</p>
     </section>
     <aside class="controls">
       <label for="kelly">Kelly sizing</label>
@@ -113,7 +123,10 @@
   <div id="error"></div>
 
   <section class="section">
-    <div class="section-head"><div><div class="eyebrow">Paper account</div><h2>$100 browser bankroll</h2></div><button id="reset-paper" class="danger">Reset paper account</button></div>
+    <div class="section-head">
+      <div><div class="eyebrow">Paper account</div><h2>$100 browser bankroll</h2></div>
+      <div class="actions"><button id="export-paper" class="secondary">Export bets</button><button id="reset-paper" class="danger">Reset paper account</button></div>
+    </div>
     <div id="bankroll" class="summary-grid"></div>
   </section>
 
@@ -137,12 +150,36 @@
     <div id="paper-bets" class="paper-list"></div>
   </section>
 
+  <section class="section">
+    <div class="section-head">
+      <div><div class="eyebrow">Walk-forward</div><h2>Model history</h2></div>
+      <div class="inline-controls">
+        <label>Season<input id="backtest-season" type="number" min="2000" max="2100" /></label>
+        <label>Warmup<input id="backtest-min-games" type="number" min="1" max="40" value="10" /></label>
+        <button id="run-backtest">Run history</button>
+      </div>
+    </div>
+    <div id="backtest-status" class="muted">Loading historical results…</div>
+    <h3>Enhanced v0.5</h3>
+    <div id="backtest-metrics" class="summary-grid" style="margin-top:12px"></div>
+    <h3>Old v0.4</h3>
+    <div id="baseline-metrics" class="summary-grid" style="margin-top:12px"></div>
+    <div id="model-change" class="notice" style="margin-top:12px"></div>
+    <div class="history-note">Accuracy = winner picks. Brier = probability error: lower is better, 0 is perfect, and 0.25 is coin-flip level. Log loss = confidence penalty. Historical betting ROI still requires archived pregame odds.</div>
+    <h3>Leakage check</h3>
+    <div id="leakage-audit" class="notice"></div>
+    <h3>Enhanced calibration</h3>
+    <div id="calibration"></div>
+    <h3>Recent predictions</h3>
+    <div id="historical-games"></div>
+  </section>
+
   <details id="diagnostics-wrap">
     <summary>Matching diagnostics</summary>
     <div id="diagnostics" class="notice"></div>
   </details>
 
-  <div class="notice section"><strong>Kelly sizing:</strong> the page calculates full Kelly from the model probability and executable ask, then applies the selected fraction. Quarter Kelly is the default because the current baseball model is still unvalidated. Suggested stakes are also capped to available cash and the shares visible at the best ask.</div>
+  <div class="notice section"><strong>Kelly sizing:</strong> still experimental. Use the model comparison above first. Quarter Kelly remains the maximum default, and suggested stakes are capped to available cash and visible best-ask depth.</div>
   <footer>Paper-trading research only. Open the linked event to place an actual Polymarket trade. The app does not store wallet credentials or submit real-money orders.</footer>
 </main>
 <script>
@@ -197,14 +234,27 @@
   function renderAccount() {
     const account = loadAccount();
     const open = account.bets.filter(bet => bet.status === 'open');
+    const settled = account.bets.filter(bet => bet.status === 'won' || bet.status === 'lost');
+    const wins = settled.filter(bet => bet.status === 'won').length;
+    const graded = settled.filter(bet => Number.isFinite(Number(bet.modelProbability)));
+    const paperAccuracy = settled.length ? wins / settled.length : null;
+    const paperBrier = graded.length
+      ? graded.reduce((sum, bet) => {
+          const outcome = bet.status === 'won' ? 1 : 0;
+          return sum + Math.pow(Number(bet.modelProbability) - outcome, 2);
+        }, 0) / graded.length
+      : null;
     const openCost = open.reduce((sum, bet) => sum + bet.stake, 0);
     const equity = account.cash + openCost;
     const pnl = equity - account.startingBankroll;
     byId('bankroll').innerHTML = `
-      <div class="summary-card"><span>Paper bankroll</span><strong>$${equity.toFixed(2)}</strong></div>
-      <div class="summary-card"><span>Available cash for Kelly</span><strong>$${account.cash.toFixed(2)}</strong></div>
-      <div class="summary-card"><span>Paper P/L</span><strong class="${pnl >= 0 ? 'positive' : 'negative'}">${money(pnl)}</strong></div>
-      <div class="summary-card"><span>Open bets</span><strong>${open.length}</strong></div>`;
+      <div class="summary-card"><span>Bankroll</span><div class="metric-word">Money</div><strong>$${equity.toFixed(2)}</strong></div>
+      <div class="summary-card"><span>Cash</span><div class="metric-word">Available</div><strong>$${account.cash.toFixed(2)}</strong></div>
+      <div class="summary-card"><span>P/L</span><div class="metric-word">Profit</div><strong class="${pnl >= 0 ? 'positive' : 'negative'}">${money(pnl)}</strong></div>
+      <div class="summary-card"><span>Open</span><div class="metric-word">Pending</div><strong>${open.length}</strong></div>
+      <div class="summary-card"><span>Accuracy</span><div class="metric-word">Correct</div><strong>${paperAccuracy == null ? '—' : pct(paperAccuracy)}</strong></div>
+      <div class="summary-card"><span>Brier</span><div class="metric-word">Error</div><strong>${paperBrier == null ? '—' : paperBrier.toFixed(3)}</strong></div>
+      <div class="summary-card"><span>Settled</span><div class="metric-word">Sample</div><strong>${settled.length}</strong></div>`;
 
     if (!account.bets.length) {
       byId('paper-bets').innerHTML = '<div class="notice">No paper bets yet. Use a green Kelly-sized paper-bet button.</div>';
@@ -255,6 +305,22 @@
     renderAccount();
   }
 
+  function enrichPaperBets(games) {
+    const account = loadAccount();
+    let changed = false;
+    for (const bet of account.bets) {
+      if (Number.isFinite(Number(bet.modelProbability))) continue;
+      const game = games.find(item => item.game_pk === bet.gamePk);
+      if (!game) continue;
+      const side = game.side_a.team === bet.team ? game.side_a : game.side_b.team === bet.team ? game.side_b : null;
+      if (!side) continue;
+      bet.modelProbability = side.model_probability;
+      bet.edge = side.edge;
+      changed = true;
+    }
+    if (changed) saveAccount(account);
+  }
+
   function placePaperBet(gamePk, team) {
     if (!latestData) return;
     const game = latestData.games.find(item => item.game_pk === gamePk);
@@ -286,6 +352,8 @@
       status: 'open',
       kellyMultiplier: side.kelly_multiplier,
       fullKellyFraction: side.full_kelly_fraction,
+      modelProbability: side.model_probability,
+      edge: side.edge,
       polymarketUrl: game.polymarket_url
     });
     saveAccount(account);
@@ -380,6 +448,94 @@
       ${d.examples.length ? `<hr>${d.examples.map(esc).join('<br>')}` : ''}`;
   }
 
+  function metricCards(model, homeBaseline = null) {
+    const accuracy = model.accuracy == null ? '—' : pct(model.accuracy);
+    const brier = model.brier_score == null ? '—' : Number(model.brier_score).toFixed(3);
+    const logLoss = model.log_loss == null ? '—' : Number(model.log_loss).toFixed(3);
+    const home = homeBaseline == null ? '' : `<div class="summary-card"><span>Home</span><div class="metric-word">Baseline</div><strong>${pct(homeBaseline)}</strong></div>`;
+    return `
+      <div class="summary-card"><span>Accuracy</span><div class="metric-word">Correct</div><strong>${accuracy}</strong></div>
+      <div class="summary-card"><span>Brier</span><div class="metric-word">Error</div><strong>${brier}</strong></div>
+      <div class="summary-card"><span>Log loss</span><div class="metric-word">Risk</div><strong>${logLoss}</strong></div>
+      <div class="summary-card"><span>Predictions</span><div class="metric-word">Sample</div><strong>${model.prediction_count}</strong></div>${home}`;
+  }
+
+  function deltaText(value, kind) {
+    if (value == null) return '—';
+    const good = value > 0;
+    const formatted = kind === 'accuracy' ? `${value >= 0 ? '+' : ''}${(value * 100).toFixed(2)} pts` : `${value >= 0 ? '+' : ''}${value.toFixed(4)}`;
+    return `<strong class="${good ? 'positive' : value < 0 ? 'negative' : ''}">${formatted}</strong>`;
+  }
+
+  function renderBacktest(data) {
+    byId('backtest-metrics').innerHTML = metricCards(data.enhanced, data.home_baseline_accuracy);
+    byId('baseline-metrics').innerHTML = metricCards(data.baseline);
+    byId('model-change').innerHTML = `
+      <strong>Change versus old model</strong><br>
+      Accuracy: ${deltaText(data.accuracy_delta, 'accuracy')} ·
+      Brier improvement: ${deltaText(data.brier_delta, 'brier')} ·
+      Log-loss improvement: ${deltaText(data.log_loss_delta, 'log')}<br>
+      <span class="muted">Positive Brier and log-loss changes mean the enhanced model made smaller probability errors.</span>`;
+
+    const audit = data.leakage_audit || {};
+    const checks = [
+      ['Time order', audit.chronological_order],
+      ['Predict first', audit.prediction_before_result_update],
+      ['Game excluded', audit.current_game_excluded],
+      ['Prior season', audit.prior_season_only_for_priors],
+      ['Past calibration', audit.calibrator_uses_past_only],
+    ];
+    byId('leakage-audit').innerHTML = `<strong class="${audit.passed ? 'positive' : 'negative'}">${audit.passed ? 'PASS' : 'FAIL'}</strong> · ${checks.map(([name, ok]) => `${esc(name)}: <strong class="${ok ? 'positive' : 'negative'}">${ok ? 'Yes' : 'No'}</strong>`).join(' · ')}<br><span class="muted">${esc(audit.note || '')}</span>`;
+
+    const calibrationRows = data.calibration.map(bucket => `
+      <tr><td>${esc(bucket.label)}</td><td>${bucket.mean_probability == null ? '—' : pct(bucket.mean_probability)}</td><td>${bucket.actual_rate == null ? '—' : pct(bucket.actual_rate)}</td><td>${bucket.predictions}</td></tr>`).join('');
+    byId('calibration').innerHTML = `<div class="table-wrap"><table><thead><tr><th>Range</th><th>Forecast</th><th>Actual</th><th>Games</th></tr></thead><tbody>${calibrationRows}</tbody></table></div>`;
+
+    const rows = data.recent_predictions.map(game => `
+      <tr><td>${new Date(game.game_date).toLocaleDateString()}</td><td>${esc(game.away_team)} ${game.away_score}–${game.home_score} ${esc(game.home_team)}</td><td>${esc(game.predicted_winner)} ${pct(game.predicted_probability)}</td><td>${esc(game.baseline_predicted_winner || '—')} ${game.baseline_predicted_probability == null ? '' : pct(game.baseline_predicted_probability)}</td><td class="${game.correct ? 'positive' : 'negative'}">${game.correct ? 'Correct' : 'Wrong'}</td></tr>`).join('');
+    byId('historical-games').innerHTML = rows
+      ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Result</th><th>Enhanced</th><th>Old</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : '<div class="notice">Not enough completed games after the selected warmup.</div>';
+    const priorText = data.prior_season ? ` · priors and initial calibration from ${data.prior_season}` : '';
+    byId('backtest-status').textContent = `${data.season} through ${data.end_date} · ${data.completed_games} finals · ${data.prediction_count} predictions after ${data.min_games} prior games per team${priorText}.`;
+  }
+
+  async function loadBacktest() {
+    const season = Number(byId('backtest-season').value);
+    const minGames = Number(byId('backtest-min-games').value);
+    const button = byId('run-backtest');
+    button.disabled = true;
+    byId('backtest-status').textContent = 'Replaying completed games without future data…';
+    try {
+      const query = new URLSearchParams({ season: String(season), min_games: String(minGames) });
+      const response = await fetch(`/api/v1/backtest/mlb?${query}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+      renderBacktest(data);
+    } catch (error) {
+      byId('backtest-status').innerHTML = `<span class="negative">${esc(error.message)}</span>`;
+      byId('backtest-metrics').innerHTML = '';
+      byId('baseline-metrics').innerHTML = '';
+      byId('model-change').innerHTML = '';
+      byId('leakage-audit').innerHTML = '';
+      byId('calibration').innerHTML = '';
+      byId('historical-games').innerHTML = '';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  function exportPaperAccount() {
+    const account = loadAccount();
+    const blob = new Blob([JSON.stringify(account, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `moneyball-paper-bets-${new Date().toISOString().slice(0, 10)}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function refresh() {
     const account = loadAccount();
     const bankroll = Math.max(0.01, Number(account.cash));
@@ -395,6 +551,8 @@
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
       latestData = data;
+      enrichPaperBets(data.games);
+      renderAccount();
       renderTopPick(data);
       byId('scoreboard').innerHTML = data.scoreboard.length ? data.scoreboard.map(scoreCard).join('') : '<div class="notice">No MLB games in the selected date window.</div>';
       byId('games').innerHTML = renderMarkets(data.games);
@@ -411,6 +569,8 @@
   }
 
   byId('refresh').addEventListener('click', refresh);
+  byId('run-backtest').addEventListener('click', loadBacktest);
+  byId('export-paper').addEventListener('click', exportPaperAccount);
   byId('kelly').addEventListener('change', refresh);
   byId('days').addEventListener('change', refresh);
   byId('reset-paper').addEventListener('click', () => {
@@ -420,8 +580,10 @@
       refresh();
     }
   });
+  byId('backtest-season').value = String(new Date().getFullYear());
   renderAccount();
   refresh();
+  loadBacktest();
   setInterval(refresh, 60000);
 </script>
 </body>

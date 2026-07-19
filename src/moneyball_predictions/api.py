@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .backtest import BacktestError, build_mlb_backtest
 from .live import (
     LivePredictionError,
     build_live_mlb_predictions,
@@ -16,6 +18,7 @@ from .live import (
 from .model import log5_probability, pythagorean_expectation
 from .odds import devig_two_way_decimal, expected_value
 from .schemas import (
+    BacktestResponse,
     LiveMlbResponse,
     PredictionRequest,
     PredictionResponse,
@@ -28,8 +31,8 @@ STATIC_DIR = PACKAGE_DIR / "static"
 
 app = FastAPI(
     title="Moneyball Predictions API",
-    version="0.3.1",
-    description="MLB scores, Polymarket moneylines, recommendations, and paper trading.",
+    version="0.5.0",
+    description="MLB predictions, paper trading, scores, and leakage-safe model comparison.",
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -55,6 +58,22 @@ async def live_mlb_markets(
         )
     except LivePredictionError as exc:
         raise HTTPException(status_code=502, detail=f"Live data refresh failed: {exc}") from exc
+
+
+@app.get("/api/v1/backtest/mlb", response_model=BacktestResponse)
+async def mlb_backtest(
+    season: int = Query(default=2026, ge=2000, le=2100),
+    through: date | None = Query(default=None),
+    min_games: int = Query(default=10, ge=1, le=40),
+) -> BacktestResponse:
+    try:
+        return await build_mlb_backtest(
+            season=season,
+            through=through,
+            min_games=min_games,
+        )
+    except BacktestError as exc:
+        raise HTTPException(status_code=502, detail=f"Historical backtest failed: {exc}") from exc
 
 
 @app.get("/api/v1/mlb/game/{game_pk}", response_model=ScoreboardGame)

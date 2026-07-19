@@ -1,24 +1,41 @@
-# Moneyball Predictions v0.3.1
+# Moneyball Predictions v0.5.0
 
-A local MLB sabermetric research dashboard that combines official MLB schedules/scores with executable Polymarket pregame moneyline asks.
+A local MLB sabermetric research dashboard combining official MLB schedules and scores with executable Polymarket pregame moneyline asks.
 
-## What v0.3.1 adds
+## What v0.5.0 changes
 
-- Polymarket-style compact matchup rows with both team prices shown side by side
-- Games grouped by local date and sorted by official MLB first pitch, earliest first
-- Full Kelly calculation for every side
-- Quarter, half, or full Kelly selection in the dashboard
-- Paper-bet stake sized from available browser bankroll instead of a fixed dollar input
-- Kelly stakes capped by available top-of-book ask depth so the shown price remains executable
-- Top recommendation ranked by Kelly-sized expected profit
+The history panel now compares two models on the exact same games:
 
-Quarter Kelly is the default because the current model is not yet validated with starting pitchers, park factors, bullpen usage, weather, or walk-forward backtesting. The page still shows the full-Kelly percentage so the underlying calculation is transparent.
+- **Old v0.4:** current-season runs scored/allowed, Pythagorean expectation, and Log5.
+- **Enhanced v0.5:** previous-season regression, league-average shrinkage, a home-field adjustment, and Platt probability calibration trained only on previously completed games.
 
-## Upgrade an existing checkout
+The page reports Accuracy, Brier, Log loss, calibration buckets, recent predictions, and the improvement or decline versus the old model.
+
+## Leakage controls
+
+Historical games are sorted by exact game timestamp. For each game the code:
+
+1. reads only statistics from earlier completed games;
+2. creates and stores the prediction;
+3. grades the frozen prediction against the final result;
+4. only then adds the current score to running team totals;
+5. updates the calibrator only after the prediction has been graded.
+
+Previous-season final data may be used because it was already known before the target season began. The current game's result and every future result are excluded from its prediction.
+
+## Important interpretation
+
+v0.5.0 is an experiment, not a promise that the enhanced model wins. The comparison panel is the acceptance test. Keep the new model only if it improves probability metrics on untouched seasons, especially Brier and Log loss.
+
+The live board now uses previous-season regression plus home field, but it still does not include starting-pitcher quality, bullpen fatigue, lineups, park factors, or weather.
+
+`BET` clears the configured edge and ROI thresholds. `LEAN` is informational only and does not get a paper-bet button.
+
+## Upgrade an existing Desktop checkout
 
 ```bash
-cd ~/Downloads/Moneyball-Predictions
-unzip -o ~/Downloads/moneyball-polymarket-v0.3.1.zip -d .
+cd ~/Desktop/baseball/Moneyball-Predictions
+unzip -o ~/Downloads/moneyball-polymarket-v0.5.0.zip -d .
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ruff check .
@@ -26,27 +43,17 @@ pytest -q
 python -m uvicorn moneyball_predictions.api:app --reload
 ```
 
-Open `http://127.0.0.1:8000`.
+Open `http://127.0.0.1:8000` and hard refresh with `Command + Shift + R`.
 
-## Kelly formula for a prediction-market share
+The page header must say `v0.5.0`.
 
-For model probability `p` and executable buy price `c`, a winning share pays `$1` and a losing share pays `$0`. Full Kelly simplifies to:
+## Historical API
 
 ```text
-full_kelly_fraction = max(0, (p - c) / (1 - c))
-selected_stake = bankroll * full_kelly_fraction * selected_multiplier
+http://127.0.0.1:8000/api/v1/backtest/mlb?season=2026&min_games=10
 ```
 
-The multiplier is `0.25`, `0.50`, or `1.00`. If the number of shares available at the best ask is smaller than the Kelly order, the paper stake is capped to that top-of-book notional.
-
-## Recommendation thresholds
-
-A side receives `BET` only when both are true at the executable CLOB ask:
-
-- model probability minus ask price is at least 5 percentage points;
-- expected ROI is at least 5%.
-
-A positive edge below those thresholds is a `LEAN`. Everything else is `PASS`.
+The response includes `baseline`, `enhanced`, metric deltas, and `leakage_audit`.
 
 ## Tests
 
@@ -55,15 +62,22 @@ ruff check .
 pytest -q
 ```
 
+Expected result for this package:
+
+```text
+All checks passed!
+37 passed
+```
+
 ## Git workflow
 
 ```bash
 git status
 git add .
-git commit -m "Add chronological market board and Kelly sizing"
+git commit -m "Add leakage-safe enhanced model comparison"
 git push
 ```
 
 ## Disclaimer
 
-Research and paper trading only. Kelly sizing is only as reliable as the probability estimate. A miscalibrated model can make Kelly stakes dangerously large, which is why fractional Kelly is the default.
+Research and paper trading only. Kelly sizing is only as reliable as the probability estimate. Keep stakes small until the enhanced model proves lower out-of-sample Brier and Log loss than both the old model and the market baseline.

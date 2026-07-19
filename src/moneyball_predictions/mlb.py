@@ -43,6 +43,7 @@ class MlbGameState:
     away_probable_pitcher: str | None
     home_probable_pitcher: str | None
     venue: str | None
+    game_type: str | None = None
 
     @property
     def is_live(self) -> bool:
@@ -130,6 +131,7 @@ def _parse_schedule_payload(payload: object) -> list[MlbGameState]:
                     away_probable_pitcher=_optional_text(away_pitcher.get("fullName")),
                     home_probable_pitcher=_optional_text(home_pitcher.get("fullName")),
                     venue=_optional_text(venue.get("name")),
+                    game_type=_optional_text(raw_game.get("gameType")),
                 )
             )
     return games
@@ -218,3 +220,27 @@ async def fetch_mlb_game(
     response.raise_for_status()
     games = _parse_schedule_payload(response.json())
     return games[0] if games else None
+
+
+async def fetch_mlb_regular_season_schedule(
+    client: httpx.AsyncClient,
+    *,
+    season: int,
+    start_date: date,
+    end_date: date,
+) -> list[MlbGameState]:
+    """Fetch regular-season MLB games for walk-forward validation."""
+    response = await client.get(
+        f"{MLB_STATS_BASE_URL}/schedule",
+        params={
+            "sportId": 1,
+            "season": season,
+            "startDate": start_date.isoformat(),
+            "endDate": end_date.isoformat(),
+            "gameTypes": "R",
+            "hydrate": "team",
+        },
+    )
+    response.raise_for_status()
+    games = _parse_schedule_payload(response.json())
+    return [game for game in games if game.game_type in {None, "R"}]

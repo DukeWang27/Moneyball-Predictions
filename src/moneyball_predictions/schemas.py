@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -85,7 +85,9 @@ class LiveGamePrediction(BaseModel):
     recommendation_reason: str
     liquidity: float | None = None
     volume: float | None = None
-    methodology: str = "Current-season run differential strength + Log5; no pitcher adjustment yet"
+    methodology: str = (
+        "Prior-regressed run differential + Log5 + home field; pitcher adjustment pending"
+    )
 
 
 class RecommendedBet(BaseModel):
@@ -154,3 +156,85 @@ class LiveMlbResponse(BaseModel):
     scoreboard: list[ScoreboardGame]
     diagnostics: MatchingDiagnostics
     skipped_events: list[str] = Field(default_factory=list)
+
+
+class BacktestCalibrationBucket(BaseModel):
+    label: str
+    predictions: int
+    mean_probability: float | None = None
+    actual_rate: float | None = None
+
+
+class BacktestModelMetrics(BaseModel):
+    key: str
+    label: str
+    prediction_count: int
+    accuracy: float | None
+    brier_score: float | None
+    log_loss: float | None
+    calibration: list[BacktestCalibrationBucket]
+
+
+class BacktestLeakageAudit(BaseModel):
+    chronological_order: bool = True
+    prediction_before_result_update: bool = True
+    current_game_excluded: bool = True
+    prior_season_only_for_priors: bool = True
+    calibrator_uses_past_only: bool = True
+    passed: bool = True
+    note: str = (
+        "Each prediction is created before the current final score is added. Priors use the "
+        "previous season, and calibration uses only earlier settled predictions."
+    )
+
+
+class BacktestGame(BaseModel):
+    game_pk: int
+    game_date: str
+    away_team: str
+    home_team: str
+    away_score: int
+    home_score: int
+    away_probability: float
+    home_probability: float
+    predicted_winner: str
+    predicted_probability: float
+    winner: str
+    correct: bool
+    brier: float
+    log_loss: float
+    baseline_away_probability: float | None = None
+    baseline_home_probability: float | None = None
+    baseline_predicted_winner: str | None = None
+    baseline_predicted_probability: float | None = None
+    baseline_correct: bool | None = None
+    raw_home_probability: float | None = None
+    calibrated: bool = False
+
+
+class BacktestResponse(BaseModel):
+    generated_at: datetime
+    season: int
+    prior_season: int | None = None
+    start_date: date
+    end_date: date
+    min_games: int
+    completed_games: int
+    prediction_count: int
+    accuracy: float | None
+    brier_score: float | None
+    log_loss: float | None
+    home_baseline_accuracy: float | None
+    calibration: list[BacktestCalibrationBucket]
+    recent_predictions: list[BacktestGame]
+    baseline: BacktestModelMetrics
+    enhanced: BacktestModelMetrics
+    accuracy_delta: float | None = None
+    brier_delta: float | None = None
+    log_loss_delta: float | None = None
+    calibration_training_games: int = 0
+    leakage_audit: BacktestLeakageAudit = Field(default_factory=BacktestLeakageAudit)
+    methodology: str = (
+        "Leakage-safe walk-forward comparison: old Pythagorean + Log5 versus a prior-"
+        "regressed, home-adjusted, past-only calibrated model"
+    )
