@@ -1,101 +1,69 @@
-# Moneyball Predictions
+# Moneyball Predictions v0.3.1
 
-A research-first MLB sabermetric prediction and paper-trading platform.
+A local MLB sabermetric research dashboard that combines official MLB schedules/scores with executable Polymarket pregame moneyline asks.
 
-The first MVP is intentionally small and auditable. It currently:
+## What v0.3.1 adds
 
-- computes dynamic-exponent Pythagorean team strength;
-- uses Log5 to produce a matchup probability;
-- removes overround from conventional two-way decimal sportsbook odds;
-- calculates model edge and expected value for both sides;
-- exposes the model through a FastAPI endpoint and a minimal browser dashboard;
-- includes automated tests and GitHub Actions CI.
+- Polymarket-style compact matchup rows with both team prices shown side by side
+- Games grouped by local date and sorted by official MLB first pitch, earliest first
+- Full Kelly calculation for every side
+- Quarter, half, or full Kelly selection in the dashboard
+- Paper-bet stake sized from available browser bankroll instead of a fixed dollar input
+- Kelly stakes capped by available top-of-book ask depth so the shown price remains executable
+- Top recommendation ranked by Kelly-sized expected profit
 
-It does **not** yet pull live odds, adjust for starting pitchers, create paper bets, or claim predictive profitability.
+Quarter Kelly is the default because the current model is not yet validated with starting pitchers, park factors, bullpen usage, weather, or walk-forward backtesting. The page still shows the full-Kelly percentage so the underlying calculation is transparent.
 
-## Local setup
+## Upgrade an existing checkout
 
 ```bash
-python3 -m venv .venv
+cd ~/Downloads/Moneyball-Predictions
+unzip -o ~/Downloads/moneyball-polymarket-v0.3.1.zip -d .
 source .venv/bin/activate
-python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
+ruff check .
+pytest -q
 python -m uvicorn moneyball_predictions.api:app --reload
 ```
 
 Open `http://127.0.0.1:8000`.
 
-Run the tests:
+## Kelly formula for a prediction-market share
+
+For model probability `p` and executable buy price `c`, a winning share pays `$1` and a losing share pays `$0`. Full Kelly simplifies to:
+
+```text
+full_kelly_fraction = max(0, (p - c) / (1 - c))
+selected_stake = bankroll * full_kelly_fraction * selected_multiplier
+```
+
+The multiplier is `0.25`, `0.50`, or `1.00`. If the number of shares available at the best ask is smaller than the Kelly order, the paper stake is capped to that top-of-book notional.
+
+## Recommendation thresholds
+
+A side receives `BET` only when both are true at the executable CLOB ask:
+
+- model probability minus ask price is at least 5 percentage points;
+- expected ROI is at least 5%.
+
+A positive edge below those thresholds is a `LEAN`. Everything else is `PASS`.
+
+## Tests
 
 ```bash
-pytest -q
 ruff check .
+pytest -q
 ```
 
-Fetch the canonical MLB team-ID reference file:
+## Git workflow
 
 ```bash
-python scripts/fetch_data.py --source mlb-teams
+git status
+git add .
+git commit -m "Add chronological market board and Kelly sizing"
+git push
 ```
-
-The result is written beneath `data/`, which is intentionally ignored by git.
-
-## API example
-
-```bash
-curl -X POST http://127.0.0.1:8000/api/v1/predict \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "team_a": {"name":"Yankees","runs_scored":510,"runs_allowed":430,"games_played":100},
-    "team_b": {"name":"Red Sox","runs_scored":470,"runs_allowed":460,"games_played":100},
-    "decimal_odds_a":1.75,
-    "decimal_odds_b":2.20,
-    "stake":10
-  }'
-```
-
-## Important market-pricing distinction
-
-The current de-vig function is for **sportsbook-style two-way odds**. Polymarket is an order-book prediction market, so its integration should use executable bid/ask prices, spread, depth, and applicable fees rather than blindly applying sportsbook de-vigging to last-trade prices.
-
-## Planned milestones
-
-### MVP 0.1 — included in this commit
-
-- Core Pythagorean + Log5 model
-- Two-way de-vig and EV math
-- Manual-input dashboard
-- Tests and CI
-
-### MVP 0.2 — next
-
-- MLB Stats API team IDs and scheduled games
-- Polymarket Gamma market discovery
-- CLOB executable-price adapter
-- Match MLB games to Polymarket markets
-- Show live model probability, market probability, spread/fees, edge, and EV
-
-### v2
-
-- Starting-pitcher FIP adjustment
-- Entity matching and unmatched-name review queue
-- SQLite paper-trading ledger with $100 starting bankroll
-- Automatic resolution from final MLB scores
-- Calibration reporting
-
-### v3+
-
-- Fractional Kelly sizing and CLV snapshots
-- The Odds API integration for consensus sportsbook lines and props
-- Park factors, recency weighting, bullpen fatigue, weather, and small-sample gating
-- Walk-forward historical backtesting with strict as-of-date features
-
-## Data and secrets
-
-- Keep downloaded datasets in `data/`.
-- Keep API keys in `.env`; never commit them.
-- Copy `.env.example` to `.env` when integrations are added.
 
 ## Disclaimer
 
-This software is for research and paper trading only. It is not financial advice and should not be treated as evidence of a profitable betting strategy without rigorous out-of-sample validation.
+Research and paper trading only. Kelly sizing is only as reliable as the probability estimate. A miscalibrated model can make Kelly stakes dangerously large, which is why fractional Kelly is the default.

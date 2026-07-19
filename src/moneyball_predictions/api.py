@@ -1,24 +1,35 @@
-"""FastAPI application for the first Moneyball Predictions MVP."""
+"""FastAPI application for Moneyball Predictions."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .live import (
+    LivePredictionError,
+    build_live_mlb_predictions,
+    build_single_scoreboard_game,
+)
 from .model import log5_probability, pythagorean_expectation
 from .odds import devig_two_way_decimal, expected_value
-from .schemas import PredictionRequest, PredictionResponse, SideAnalysis
+from .schemas import (
+    LiveMlbResponse,
+    PredictionRequest,
+    PredictionResponse,
+    ScoreboardGame,
+    SideAnalysis,
+)
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 STATIC_DIR = PACKAGE_DIR / "static"
 
 app = FastAPI(
     title="Moneyball Predictions API",
-    version="0.1.0",
-    description="MLB sabermetric probability and market-edge calculator.",
+    version="0.3.1",
+    description="MLB scores, Polymarket moneylines, recommendations, and paper trading.",
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -26,6 +37,32 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/v1/polymarket/mlb", response_model=LiveMlbResponse)
+async def live_mlb_markets(
+    bankroll: float = Query(default=100.0, gt=0, le=1_000_000),
+    kelly_multiplier: float = Query(default=0.25, gt=0, le=1.0),
+    season: int | None = Query(default=None, ge=2000, le=2100),
+    days: int = Query(default=2, ge=1, le=7),
+) -> LiveMlbResponse:
+    try:
+        return await build_live_mlb_predictions(
+            bankroll=bankroll,
+            kelly_multiplier=kelly_multiplier,
+            season=season,
+            days=days,
+        )
+    except LivePredictionError as exc:
+        raise HTTPException(status_code=502, detail=f"Live data refresh failed: {exc}") from exc
+
+
+@app.get("/api/v1/mlb/game/{game_pk}", response_model=ScoreboardGame)
+async def mlb_game_status(game_pk: int) -> ScoreboardGame:
+    try:
+        return await build_single_scoreboard_game(game_pk)
+    except LivePredictionError as exc:
+        raise HTTPException(status_code=502, detail=f"MLB game refresh failed: {exc}") from exc
 
 
 @app.post("/api/v1/predict", response_model=PredictionResponse)

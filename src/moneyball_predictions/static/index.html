@@ -5,128 +5,424 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Moneyball Predictions</title>
   <style>
-    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
     * { box-sizing: border-box; }
-    body { margin: 0; background: #080b10; color: #f7f8fa; }
-    main { width: min(1100px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 72px; }
-    .eyebrow { color: #8da2bd; text-transform: uppercase; letter-spacing: .14em; font-size: 12px; }
-    h1 { font-size: clamp(36px, 7vw, 70px); line-height: .98; margin: 10px 0 16px; max-width: 850px; }
-    .lede { color: #aeb9c9; max-width: 700px; font-size: 18px; line-height: 1.55; }
-    .panel { background: #111722; border: 1px solid #263247; border-radius: 18px; padding: 22px; margin-top: 28px; }
-    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-    .team { background: #0b1018; border: 1px solid #202b3d; border-radius: 14px; padding: 18px; }
-    h2, h3 { margin-top: 0; }
-    label { display: block; color: #aeb9c9; font-size: 13px; margin: 12px 0 6px; }
-    input { width: 100%; border: 1px solid #35445d; border-radius: 9px; background: #0a0f17; color: white; padding: 11px 12px; font-size: 15px; }
-    .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-    .market-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 16px; }
-    button { width: 100%; margin-top: 18px; border: 0; border-radius: 10px; padding: 14px 18px; background: #f5f7fb; color: #0a0d12; font-weight: 800; font-size: 15px; cursor: pointer; }
-    button:hover { opacity: .9; }
-    .results { display: none; }
-    .result-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
-    .result-card { border: 1px solid #29364b; border-radius: 14px; padding: 18px; background: #0b1018; }
-    .metric { display: flex; justify-content: space-between; gap: 16px; padding: 9px 0; border-bottom: 1px solid #1c2635; }
-    .metric:last-child { border-bottom: 0; }
-    .metric span:first-child { color: #9eadc0; }
-    .positive { color: #73e6a1; }
-    .negative { color: #ff8d92; }
-    .recommendation { margin-top: 18px; padding: 14px; border-radius: 10px; background: #151e2b; font-weight: 750; }
-    .error { color: #ff8d92; margin-top: 14px; white-space: pre-wrap; }
-    footer { color: #77869a; margin-top: 34px; font-size: 13px; }
-    @media (max-width: 780px) { .grid, .result-grid, .market-row { grid-template-columns: 1fr; } .row { grid-template-columns: 1fr; } }
+    body { margin: 0; background: #090b10; color: #f4f5f7; }
+    main { width: min(1180px, calc(100% - 28px)); margin: 0 auto; padding: 32px 0 72px; }
+    a { color: inherit; }
+    .topbar { display: grid; grid-template-columns: 1fr 320px; gap: 28px; align-items: end; }
+    .eyebrow { color: #8ea3bf; text-transform: uppercase; letter-spacing: .14em; font-size: 12px; }
+    h1 { font-size: clamp(38px, 6vw, 68px); line-height: .98; margin: 10px 0 16px; max-width: 850px; }
+    h2 { margin: 0 0 12px; }
+    .lede { color: #a7b1c1; max-width: 820px; font-size: 17px; line-height: 1.55; }
+    .panel, .controls, .score-card, .bet-row, .market-row { background: #11151d; border: 1px solid #282f3c; border-radius: 14px; }
+    .controls { padding: 16px; }
+    label { display: block; color: #aeb7c5; font-size: 13px; margin-bottom: 7px; }
+    input, select { width: 100%; border: 1px solid #363f4f; border-radius: 9px; background: #090c12; color: white; padding: 10px 12px; font-size: 15px; margin-bottom: 10px; }
+    button, .button { display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 9px; padding: 10px 13px; background: #f4f5f7; color: #0a0c11; font-weight: 800; cursor: pointer; text-decoration: none; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .secondary { background: #1a202b; color: #dce4ef; border: 1px solid #374152; }
+    .danger { background: #2b151a; color: #ffadb1; border: 1px solid #62313c; }
+    .status { margin: 22px 0 14px; color: #94a2b6; }
+    .section { margin-top: 28px; }
+    .section-head { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 12px; }
+    .muted { color: #8f9bad; }
+    .summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .summary-card { padding: 16px; background: #0e1219; border: 1px solid #282f3c; border-radius: 13px; }
+    .summary-card span { display: block; color: #92a0b3; font-size: 13px; margin-bottom: 7px; }
+    .summary-card strong { font-size: 24px; }
+    .top-pick { padding: 20px; border-color: #35664b; background: linear-gradient(140deg, #102018, #11151d 60%); }
+    .pick-title { font-size: 26px; margin: 5px 0 8px; }
+    .pick-metrics { display: flex; flex-wrap: wrap; gap: 10px 20px; color: #c6d0df; margin: 12px 0 18px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 10px; }
+    .scoreboard { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .score-card { padding: 15px; }
+    .score-head { display: flex; justify-content: space-between; gap: 10px; align-items: start; }
+    .badge { display: inline-block; border-radius: 999px; padding: 5px 9px; font-size: 11px; font-weight: 850; letter-spacing: .05em; }
+    .badge.live { background: #3b161a; color: #ff9ba0; }
+    .badge.final { background: #1d2734; color: #b3c0d1; }
+    .badge.preview { background: #14291e; color: #8ff0ad; }
+    .score-line { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 12px; font-size: 17px; }
+    .score-line strong { font-size: 21px; }
+    .score-note { margin-top: 12px; color: #8f9bad; font-size: 12px; line-height: 1.45; }
+    .market-date { margin: 24px 0 9px; color: #cbd3df; font-size: 13px; font-weight: 850; text-transform: uppercase; letter-spacing: .08em; }
+    .markets { display: grid; gap: 9px; }
+    .market-row { display: grid; grid-template-columns: 92px minmax(250px, 1.2fr) minmax(300px, 1fr) 126px; gap: 14px; align-items: center; padding: 14px; }
+    .market-time { font-weight: 800; font-size: 14px; }
+    .market-time small { display: block; color: #7f8a9c; font-weight: 500; margin-top: 4px; }
+    .matchup { display: grid; gap: 7px; }
+    .team-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .team-name { font-weight: 750; }
+    .team-note { color: #7f8a9c; font-size: 12px; }
+    .prices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .price-box { background: #0a0e14; border: 1px solid #283141; border-radius: 10px; padding: 10px; min-width: 0; }
+    .price-box.best { border-color: #3d8d60; box-shadow: 0 0 0 1px #3d8d6038 inset; }
+    .price-team { color: #9da9ba; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .price-main { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-weight: 850; }
+    .price-meta { margin-top: 6px; color: #7f8a9c; font-size: 11px; line-height: 1.35; }
+    .market-action { display: grid; gap: 7px; }
+    .signal-chip { border-radius: 8px; padding: 7px 9px; font-size: 12px; font-weight: 850; text-align: center; }
+    .signal-chip.BET { background: #123120; color: #9af0b5; }
+    .signal-chip.LEAN { background: #2d2815; color: #f3d989; }
+    .signal-chip.PASS { background: #182130; color: #afbdd0; }
+    .market-detail { grid-column: 2 / -1; color: #91a0b4; font-size: 12px; line-height: 1.55; border-top: 1px solid #232b38; padding-top: 10px; }
+    .paper-list { display: grid; gap: 10px; }
+    .bet-row { padding: 14px; display: grid; grid-template-columns: 1.4fr .8fr .8fr .8fr; gap: 12px; align-items: center; }
+    .positive { color: #70e59e; }
+    .negative { color: #ff9196; }
+    .error { color: #ff969a; background: #251117; border: 1px solid #62313c; border-radius: 12px; padding: 14px; white-space: pre-wrap; }
+    .notice { padding: 16px; border: 1px solid #2d3b50; border-radius: 13px; color: #9eadc0; line-height: 1.55; }
+    details { margin-top: 18px; color: #8f9bad; }
+    footer { color: #6f7f94; margin-top: 34px; font-size: 13px; line-height: 1.6; }
+    @media (max-width: 980px) {
+      .market-row { grid-template-columns: 80px 1fr; }
+      .prices, .market-action, .market-detail { grid-column: 2; }
+    }
+    @media (max-width: 760px) {
+      .topbar { grid-template-columns: 1fr; }
+      .summary-grid { grid-template-columns: repeat(2, 1fr); }
+      .scoreboard { grid-template-columns: 1fr; }
+      .market-row { grid-template-columns: 1fr; }
+      .market-time, .prices, .market-action, .market-detail { grid-column: 1; }
+      .bet-row { grid-template-columns: 1fr 1fr; }
+    }
   </style>
 </head>
 <body>
 <main>
-  <div class="eyebrow">MLB research dashboard · MVP 0.1</div>
-  <h1>Model the game. Price the edge.</h1>
-  <p class="lede">Enter season run totals and two-way decimal odds. The MVP calculates dynamic Pythagorean strength, applies Log5, removes sportsbook overround, and shows expected value.</p>
+  <div class="topbar">
+    <section>
+      <div class="eyebrow">MLB · chronological Polymarket board · v0.3.1</div>
+      <h1>Games in first-pitch order. Kelly-sized signals.</h1>
+      <p class="lede">The market board is grouped by day and sorted by the official MLB start time. Each matchup shows the two executable Polymarket asks side by side, plus the model edge and a bankroll-based Kelly stake.</p>
+    </section>
+    <aside class="controls">
+      <label for="kelly">Kelly sizing</label>
+      <select id="kelly">
+        <option value="0.25" selected>Quarter Kelly (recommended)</option>
+        <option value="0.5">Half Kelly</option>
+        <option value="1">Full Kelly</option>
+      </select>
+      <label for="days">Upcoming window</label>
+      <select id="days"><option value="1">Today only</option><option value="2" selected>Today + tomorrow</option><option value="3">Next 3 days</option></select>
+      <button id="refresh">Refresh data</button>
+    </aside>
+  </div>
 
-  <form id="prediction-form" class="panel">
-    <div class="grid">
-      <section class="team">
-        <h2>Team A</h2>
-        <label for="a-name">Name</label><input id="a-name" value="New York Yankees" required />
-        <div class="row">
-          <div><label for="a-rs">Runs scored</label><input id="a-rs" type="number" min="0" value="510" required /></div>
-          <div><label for="a-ra">Runs allowed</label><input id="a-ra" type="number" min="0" value="430" required /></div>
-          <div><label for="a-g">Games</label><input id="a-g" type="number" min="1" value="100" required /></div>
-        </div>
-      </section>
-      <section class="team">
-        <h2>Team B</h2>
-        <label for="b-name">Name</label><input id="b-name" value="Boston Red Sox" required />
-        <div class="row">
-          <div><label for="b-rs">Runs scored</label><input id="b-rs" type="number" min="0" value="470" required /></div>
-          <div><label for="b-ra">Runs allowed</label><input id="b-ra" type="number" min="0" value="460" required /></div>
-          <div><label for="b-g">Games</label><input id="b-g" type="number" min="1" value="100" required /></div>
-        </div>
-      </section>
-    </div>
-    <div class="market-row">
-      <div><label for="a-odds">Team A decimal odds</label><input id="a-odds" type="number" min="1.01" step="0.01" value="1.75" required /></div>
-      <div><label for="b-odds">Team B decimal odds</label><input id="b-odds" type="number" min="1.01" step="0.01" value="2.20" required /></div>
-      <div><label for="stake">Paper stake ($)</label><input id="stake" type="number" min="0.01" step="0.01" value="10" required /></div>
-    </div>
-    <button type="submit">Calculate prediction</button>
-    <div id="error" class="error"></div>
-  </form>
+  <div id="status" class="status">Loading MLB scores and Polymarket markets…</div>
+  <div id="error"></div>
 
-  <section id="results" class="panel results">
-    <h2>Model output</h2>
-    <div id="result-grid" class="result-grid"></div>
-    <div id="recommendation" class="recommendation"></div>
+  <section class="section">
+    <div class="section-head"><div><div class="eyebrow">Paper account</div><h2>$100 browser bankroll</h2></div><button id="reset-paper" class="danger">Reset paper account</button></div>
+    <div id="bankroll" class="summary-grid"></div>
   </section>
 
-  <footer>This is a research and paper-trading project, not financial advice. Starting-pitcher, park, recency, bullpen, weather, live odds, and backtesting layers are intentionally not included yet.</footer>
+  <section class="section">
+    <div class="section-head"><div><div class="eyebrow">What to bet</div><h2>Top Kelly-sized paper bet</h2></div></div>
+    <div id="top-pick" class="panel top-pick"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><div><div class="eyebrow">Official MLB data</div><h2>Scoreboard</h2></div><div class="muted">Pregame recommendations only.</div></div>
+    <div id="scoreboard" class="scoreboard"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><div><div class="eyebrow">Polymarket-style schedule</div><h2>Moneylines by first pitch</h2></div><div class="muted">Earliest game first.</div></div>
+    <div id="games"></div>
+  </section>
+
+  <section class="section">
+    <div class="section-head"><div><div class="eyebrow">Saved locally</div><h2>Paper bets</h2></div></div>
+    <div id="paper-bets" class="paper-list"></div>
+  </section>
+
+  <details id="diagnostics-wrap">
+    <summary>Matching diagnostics</summary>
+    <div id="diagnostics" class="notice"></div>
+  </details>
+
+  <div class="notice section"><strong>Kelly sizing:</strong> the page calculates full Kelly from the model probability and executable ask, then applies the selected fraction. Quarter Kelly is the default because the current baseball model is still unvalidated. Suggested stakes are also capped to available cash and the shares visible at the best ask.</div>
+  <footer>Paper-trading research only. Open the linked event to place an actual Polymarket trade. The app does not store wallet credentials or submit real-money orders.</footer>
 </main>
 <script>
   const byId = (id) => document.getElementById(id);
-  const number = (id) => Number(byId(id).value);
-  const pct = (value) => `${(value * 100).toFixed(2)}%`;
-  const money = (value) => `${value >= 0 ? '+' : '-'}$${Math.abs(value).toFixed(2)}`;
+  const pct = (value) => `${(Number(value) * 100).toFixed(1)}%`;
+  const cents = (value) => `${(Number(value) * 100).toFixed(1)}¢`;
+  const money = (value) => `${Number(value) >= 0 ? '+' : '-'}$${Math.abs(Number(value)).toFixed(2)}`;
+  const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
+  const ACCOUNT_KEY = 'moneyballPaperAccountV1';
+  let latestData = null;
 
-  function sideCard(side) {
-    const edgeClass = side.edge >= 0 ? 'positive' : 'negative';
-    const evClass = side.expected_value >= 0 ? 'positive' : 'negative';
-    return `<article class="result-card">
-      <h3>${side.team}</h3>
-      <div class="metric"><span>Model probability</span><strong>${pct(side.model_probability)}</strong></div>
-      <div class="metric"><span>No-vig market probability</span><strong>${pct(side.market_probability)}</strong></div>
-      <div class="metric"><span>Model edge</span><strong class="${edgeClass}">${pct(side.edge)}</strong></div>
-      <div class="metric"><span>Expected value</span><strong class="${evClass}">${money(side.expected_value)}</strong></div>
+  function safeDate(value) {
+    if (!value) return 'Start time unavailable';
+    const date = new Date(value);
+    return Number.isNaN(date.valueOf()) ? value : date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  }
+
+  function timeOnly(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.valueOf()) ? 'TBD' : date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function dayKey(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.valueOf())) return 'Unknown date';
+    return date.toLocaleDateString('en-CA');
+  }
+
+  function dayLabel(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.valueOf())) return 'Unknown date';
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(today.getDate() + 1);
+    if (date.toDateString() === today.toDateString()) return 'Today';
+    if (date.toDateString() === tomorrow.toDateString()) return 'Tomorrow';
+    return date.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+
+  function loadAccount() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ACCOUNT_KEY));
+      if (saved && Number.isFinite(saved.cash) && Array.isArray(saved.bets)) return saved;
+    } catch (_) {}
+    return { startingBankroll: 100, cash: 100, bets: [] };
+  }
+
+  function saveAccount(account) {
+    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
+  }
+
+  function renderAccount() {
+    const account = loadAccount();
+    const open = account.bets.filter(bet => bet.status === 'open');
+    const openCost = open.reduce((sum, bet) => sum + bet.stake, 0);
+    const equity = account.cash + openCost;
+    const pnl = equity - account.startingBankroll;
+    byId('bankroll').innerHTML = `
+      <div class="summary-card"><span>Paper bankroll</span><strong>$${equity.toFixed(2)}</strong></div>
+      <div class="summary-card"><span>Available cash for Kelly</span><strong>$${account.cash.toFixed(2)}</strong></div>
+      <div class="summary-card"><span>Paper P/L</span><strong class="${pnl >= 0 ? 'positive' : 'negative'}">${money(pnl)}</strong></div>
+      <div class="summary-card"><span>Open bets</span><strong>${open.length}</strong></div>`;
+
+    if (!account.bets.length) {
+      byId('paper-bets').innerHTML = '<div class="notice">No paper bets yet. Use a green Kelly-sized paper-bet button.</div>';
+      return;
+    }
+    byId('paper-bets').innerHTML = [...account.bets].reverse().map(bet => `
+      <div class="bet-row">
+        <div><strong>${esc(bet.team)}</strong><div class="muted">${esc(bet.title)} · ${safeDate(bet.startTime)}</div></div>
+        <div><span class="muted">Stake</span><br><strong>$${Number(bet.stake).toFixed(2)}</strong></div>
+        <div><span class="muted">Price</span><br><strong>${cents(bet.price)}</strong></div>
+        <div><span class="muted">Status</span><br><strong class="${bet.status === 'won' ? 'positive' : bet.status === 'lost' ? 'negative' : ''}">${esc(bet.status.toUpperCase())}${bet.profit != null ? ` · ${money(bet.profit)}` : ''}</strong></div>
+      </div>`).join('');
+  }
+
+  async function settlePaperBets(scoreboard) {
+    const account = loadAccount();
+    const open = account.bets.filter(bet => bet.status === 'open');
+    if (!open.length) return;
+    const gameMap = new Map(scoreboard.map(game => [game.game_pk, game]));
+    for (const bet of open) {
+      let game = gameMap.get(bet.gamePk);
+      if (!game) {
+        try {
+          const response = await fetch(`/api/v1/mlb/game/${bet.gamePk}`);
+          if (response.ok) game = await response.json();
+        } catch (_) {}
+      }
+      if (!game) continue;
+      const state = String(game.abstract_state || '').toLowerCase();
+      const detail = String(game.detailed_state || '').toLowerCase();
+      if (detail.includes('cancel') || detail.includes('postpon')) {
+        bet.status = 'refunded';
+        bet.profit = 0;
+        account.cash += bet.stake;
+      } else if (state === 'final' && game.winner) {
+        if (game.winner === bet.team) {
+          const payout = bet.shares;
+          account.cash += payout;
+          bet.status = 'won';
+          bet.profit = payout - bet.stake;
+        } else {
+          bet.status = 'lost';
+          bet.profit = -bet.stake;
+        }
+      }
+    }
+    saveAccount(account);
+    renderAccount();
+  }
+
+  function placePaperBet(gamePk, team) {
+    if (!latestData) return;
+    const game = latestData.games.find(item => item.game_pk === gamePk);
+    if (!game || game.signal !== 'BET' || game.recommended_side !== team) return;
+    const side = game.side_a.team === team ? game.side_a : game.side_b;
+    const account = loadAccount();
+    const stake = Math.min(Number(side.kelly_stake), account.cash);
+    if (!Number.isFinite(stake) || stake < 0.01) {
+      alert('The Kelly stake is below one cent at the current bankroll and price.');
+      return;
+    }
+    if (account.bets.some(bet => bet.gamePk === gamePk && bet.status === 'open')) {
+      alert('You already have an open paper bet on this game.');
+      return;
+    }
+    const shares = stake / Number(side.market_buy_price);
+    account.cash -= stake;
+    account.bets.push({
+      id: `${gamePk}-${Date.now()}`,
+      gamePk,
+      marketId: game.market_id,
+      title: game.title,
+      team,
+      stake,
+      price: side.market_buy_price,
+      shares,
+      startTime: game.start_time,
+      placedAt: new Date().toISOString(),
+      status: 'open',
+      kellyMultiplier: side.kelly_multiplier,
+      fullKellyFraction: side.full_kelly_fraction,
+      polymarketUrl: game.polymarket_url
+    });
+    saveAccount(account);
+    renderAccount();
+    refresh();
+  }
+  window.placePaperBet = placePaperBet;
+
+  function priceBox(side, game) {
+    const best = game.recommended_side === side.team;
+    const depth = side.kelly_capped_by_depth ? '<br>Stake capped by top-ask depth' : '';
+    return `<div class="price-box ${best ? 'best' : ''}">
+      <div class="price-team">${esc(side.team)}</div>
+      <div class="price-main"><span>Buy</span><span>${cents(side.market_buy_price)}</span></div>
+      <div class="price-meta">Model ${pct(side.model_probability)} · Edge <span class="${side.edge >= 0 ? 'positive' : 'negative'}">${pct(side.edge)}</span><br>Full Kelly ${pct(side.full_kelly_fraction)} · Selected stake $${side.kelly_stake.toFixed(2)}${depth}</div>
+    </div>`;
+  }
+
+  function marketRow(game) {
+    const selected = game.recommended_side === game.side_a.team ? game.side_a : game.side_b;
+    const paperButton = game.signal === 'BET' && selected
+      ? `<button onclick="placePaperBet(${game.game_pk}, '${esc(selected.team).replace(/&#39;/g, "\\'")}')">Paper bet $${selected.kelly_stake.toFixed(2)}</button>`
+      : '';
+    const pitchers = `${esc(game.away_probable_pitcher || 'TBD')} vs ${esc(game.home_probable_pitcher || 'TBD')}`;
+    return `<article class="market-row">
+      <div class="market-time">${timeOnly(game.start_time)}<small>MLB</small></div>
+      <div class="matchup">
+        <div class="team-row"><span class="team-name">${esc(game.away_team)}</span><span class="team-note">Away</span></div>
+        <div class="team-row"><span class="team-name">${esc(game.home_team)}</span><span class="team-note">Home</span></div>
+      </div>
+      <div class="prices">${priceBox(game.side_a, game)}${priceBox(game.side_b, game)}</div>
+      <div class="market-action">
+        <div class="signal-chip ${game.signal}">${esc(game.signal)}${game.recommended_side ? ` · ${esc(game.recommended_side)}` : ''}</div>
+        ${paperButton}
+        <a class="button secondary" href="${esc(game.polymarket_url)}" target="_blank" rel="noreferrer">Polymarket</a>
+      </div>
+      <div class="market-detail">${esc(game.recommendation_reason)}<br>${safeDate(game.start_time)} · ${pitchers} · ${esc(game.venue || 'Venue TBD')} · Volume ${Number(game.volume || 0).toLocaleString()}</div>
     </article>`;
   }
 
-  byId('prediction-form').addEventListener('submit', async (event) => {
-    event.preventDefault();
-    byId('error').textContent = '';
-    const payload = {
-      team_a: { name: byId('a-name').value, runs_scored: number('a-rs'), runs_allowed: number('a-ra'), games_played: number('a-g') },
-      team_b: { name: byId('b-name').value, runs_scored: number('b-rs'), runs_allowed: number('b-ra'), games_played: number('b-g') },
-      decimal_odds_a: number('a-odds'),
-      decimal_odds_b: number('b-odds'),
-      stake: number('stake')
-    };
+  function renderMarkets(games) {
+    if (!games.length) return '<div class="notice">No upcoming MLB moneylines currently have both a schedule match and executable asks.</div>';
+    const sorted = [...games].sort((a, b) => new Date(a.start_time) - new Date(b.start_time));
+    const groups = new Map();
+    for (const game of sorted) {
+      const key = dayKey(game.start_time);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(game);
+    }
+    return [...groups.values()].map(group => `<div class="market-date">${dayLabel(group[0].start_time)}</div><div class="markets">${group.map(marketRow).join('')}</div>`).join('');
+  }
 
+  function scoreCard(game) {
+    const state = String(game.abstract_state || 'Preview').toLowerCase();
+    const badgeClass = state === 'live' ? 'live' : state === 'final' ? 'final' : 'preview';
+    const status = state === 'live'
+      ? `${game.inning_state || ''} ${game.inning_ordinal || game.current_inning || ''}`.trim() || game.detailed_state
+      : game.detailed_state;
+    const link = game.polymarket_url ? `<a class="button secondary" href="${esc(game.polymarket_url)}" target="_blank" rel="noreferrer">Market</a>` : '';
+    return `<article class="score-card">
+      <div class="score-head"><div><span class="badge ${badgeClass}">${esc(status)}</span></div>${link}</div>
+      <div class="score-line"><span>${esc(game.away_team)}</span><strong>${game.away_score ?? '—'}</strong></div>
+      <div class="score-line"><span>${esc(game.home_team)}</span><strong>${game.home_score ?? '—'}</strong></div>
+      <div class="score-note">${safeDate(game.game_date)} · ${esc(game.venue || 'Venue TBD')}<br>${esc(game.live_bet_message)}</div>
+    </article>`;
+  }
+
+  function renderTopPick(data) {
+    const pick = data.recommended_bets[0];
+    if (!pick) {
+      byId('top-pick').innerHTML = '<div class="pick-title">No paper bet right now.</div><div class="muted">No upcoming side clears both the 5% model-edge and 5% expected-ROI thresholds at the current executable asks.</div>';
+      return;
+    }
+    const kellyName = pick.kelly_multiplier === 1 ? 'Full Kelly' : pick.kelly_multiplier === 0.5 ? 'Half Kelly' : 'Quarter Kelly';
+    const depthNote = pick.kelly_capped_by_depth ? ' · capped by shares at the best ask' : '';
+    byId('top-pick').innerHTML = `
+      <div class="eyebrow">Model-ranked #1 · ${kellyName}</div>
+      <div class="pick-title">Buy ${esc(pick.team)} at ${cents(pick.market_buy_price)}</div>
+      <div class="muted">${esc(pick.title)} · ${safeDate(pick.start_time)}</div>
+      <div class="pick-metrics"><strong>Kelly stake $${pick.kelly_stake.toFixed(2)}</strong><strong>Full Kelly ${pct(pick.full_kelly_fraction)}</strong><strong>Edge ${pct(pick.edge)}</strong><strong>Expected ROI ${pct(pick.expected_roi)}</strong><strong>Expected profit ${money(pick.expected_value)}</strong></div>
+      <div class="muted" style="margin-bottom:14px">Sized from $${data.bankroll.toFixed(2)} available paper cash${depthNote}.</div>
+      <div class="actions"><button onclick="placePaperBet(${pick.game_pk}, '${esc(pick.team).replace(/&#39;/g, "\\'")}')">Place $${pick.kelly_stake.toFixed(2)} paper bet</button><a class="button secondary" href="${esc(pick.polymarket_url)}" target="_blank" rel="noreferrer">Open on Polymarket</a></div>`;
+  }
+
+  function renderDiagnostics(d) {
+    byId('diagnostics').innerHTML = `Unsupported non-game events filtered before matching: <strong>${d.unsupported_events}</strong><br>
+      Standard matchups with no full-game moneyline: <strong>${d.no_moneyline}</strong><br>
+      Actual team-name mismatches: <strong>${d.unmatched_teams}</strong><br>
+      Outside selected date window: <strong>${d.outside_date_window}</strong><br>
+      Official MLB schedule match failures: <strong>${d.no_schedule_match}</strong><br>
+      Pregame markets without both executable asks: <strong>${d.no_executable_ask}</strong>
+      ${d.examples.length ? `<hr>${d.examples.map(esc).join('<br>')}` : ''}`;
+  }
+
+  async function refresh() {
+    const account = loadAccount();
+    const bankroll = Math.max(0.01, Number(account.cash));
+    const kelly = Number(byId('kelly').value);
+    const days = Number(byId('days').value);
+    const button = byId('refresh');
+    button.disabled = true;
+    byId('error').innerHTML = '';
+    byId('status').textContent = 'Refreshing official MLB schedule and executable Polymarket asks…';
     try {
-      const response = await fetch('/api/v1/predict', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const query = new URLSearchParams({ bankroll: String(bankroll), kelly_multiplier: String(kelly), days: String(days) });
+      const response = await fetch(`/api/v1/polymarket/mlb?${query}`);
       const data = await response.json();
-      if (!response.ok) throw new Error(JSON.stringify(data, null, 2));
-      byId('result-grid').innerHTML = sideCard(data.side_a) + sideCard(data.side_b);
-      byId('recommendation').textContent = data.recommended_side
-        ? `Positive-EV side at these inputs: ${data.recommended_side}`
-        : 'No positive-EV side at these inputs. The model says pass.';
-      byId('results').style.display = 'block';
-      byId('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+      latestData = data;
+      renderTopPick(data);
+      byId('scoreboard').innerHTML = data.scoreboard.length ? data.scoreboard.map(scoreCard).join('') : '<div class="notice">No MLB games in the selected date window.</div>';
+      byId('games').innerHTML = renderMarkets(data.games);
+      renderDiagnostics(data.diagnostics);
+      const kellyName = kelly === 1 ? 'full' : kelly === 0.5 ? 'half' : 'quarter';
+      byId('status').textContent = `${data.scoreboard.length} official games · ${data.games.length} priced markets · ${data.recommended_bets.length} BET signals · ${kellyName} Kelly · Updated ${new Date(data.generated_at).toLocaleTimeString()}`;
+      await settlePaperBets(data.scoreboard);
     } catch (error) {
-      byId('error').textContent = `Could not calculate prediction: ${error.message}`;
+      byId('status').textContent = 'Live refresh failed.';
+      byId('error').innerHTML = `<div class="error">${esc(error.message)}</div>`;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  byId('refresh').addEventListener('click', refresh);
+  byId('kelly').addEventListener('change', refresh);
+  byId('days').addEventListener('change', refresh);
+  byId('reset-paper').addEventListener('click', () => {
+    if (confirm('Reset the browser paper account to $100 and delete all paper bets?')) {
+      localStorage.removeItem(ACCOUNT_KEY);
+      renderAccount();
+      refresh();
     }
   });
+  renderAccount();
+  refresh();
+  setInterval(refresh, 60000);
 </script>
 </body>
 </html>
