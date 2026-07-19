@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -18,6 +19,10 @@ from .model import (
     logit,
     pythagorean_expectation,
     regressed_pythagorean_expectation,
+)
+from .optimized import (
+    build_target_rows,
+    prepare_optimized_model,
 )
 from .schemas import (
     BacktestCalibrationBucket,
@@ -280,27 +285,37 @@ def _training_rows_from_prior_season(
     return rows
 
 
+def _row_probability_and_correct(
+    prediction: BacktestGame,
+    mode: str,
+) -> tuple[float | None, bool | None, float | None]:
+    if mode == "baseline":
+        return (
+            prediction.baseline_predicted_probability,
+            prediction.baseline_correct,
+            prediction.baseline_home_probability,
+        )
+    if mode == "v05":
+        return (
+            prediction.enhanced_v05_predicted_probability,
+            prediction.enhanced_v05_correct,
+            prediction.enhanced_v05_home_probability,
+        )
+    return prediction.predicted_probability, prediction.correct, prediction.home_probability
+
+
 def _calibration_buckets(
     predictions: list[BacktestGame],
     *,
-    use_baseline: bool = False,
+    mode: str = "optimized",
 ) -> list[BacktestCalibrationBucket]:
     bounds = [(0.50, 0.60), (0.60, 0.70), (0.70, 0.80), (0.80, 0.90), (0.90, 1.01)]
     buckets: list[BacktestCalibrationBucket] = []
     for lower, upper in bounds:
         selected: list[tuple[float, bool]] = []
         for prediction in predictions:
-            probability = (
-                prediction.baseline_predicted_probability
-                if use_baseline
-                else prediction.predicted_probability
-            )
-            correct = (
-                bool(prediction.baseline_correct)
-                if use_baseline
-                else prediction.correct
-            )
-            if probability is not None and lower <= probability < upper:
+            probability, correct, _ = _row_probability_and_correct(prediction, mode)
+            if probability is not None and correct is not None and lower <= probability < upper:
                 selected.append((probability, correct))
         label_upper = 1.0 if upper > 1.0 else upper
         buckets.append(
@@ -327,7 +342,7 @@ def _metrics(
     *,
     key: str,
     label: str,
-    baseline: bool = False,
+    mode: str,
 ) -> BacktestModelMetrics:
     count = len(predictions)
     if not count:
@@ -338,37 +353,92 @@ def _metrics(
             accuracy=None,
             brier_score=None,
             log_loss=None,
-            calibration=_calibration_buckets([], use_baseline=baseline),
+            calibration=_calibration_buckets([], mode=mode),
         )
 
-    if baseline:
-        correct_values = [bool(row.baseline_correct) for row in predictions]
-        brier_values = []
-        log_values = []
-        for row in predictions:
-            home_outcome = 1.0 if row.winner == row.home_team else 0.0
-            home_probability = float(row.baseline_home_probability or 0.5)
-            clipped = clip_probability(home_probability)
-            brier_values.append((home_probability - home_outcome) ** 2)
-            log_values.append(
-                -(
-                    home_outcome * math.log(clipped)
-                    + (1.0 - home_outcome) * math.log(1.0 - clipped)
-                )
+    correct_values: list[bool] = []
+    brier_values: list[float] = []
+    log_values: list[float] = []
+    for row in predictions:
+        _, correct, home_probability = _row_probability_and_correct(row, mode)
+        if correct is None or home_probability is None:
+            continue
+        home_outcome = 1.0 if row.winner == row.home_team else 0.0
+        clipped = clip_probability(home_probability)
+        correct_values.append(correct)
+        brier_values.append((home_probability - home_outcome) ** 2)
+        log_values.append(
+            -(
+                home_outcome * math.log(clipped)
+                + (1.0 - home_outcome) * math.log(1.0 - clipped)
             )
-    else:
-        correct_values = [row.correct for row in predictions]
-        brier_values = [row.brier for row in predictions]
-        log_values = [row.log_loss for row in predictions]
+        )
 
+    actual_count = len(correct_values)
+    return BacktestModelMetrics(
+        key=key,
+        label=label,
+        prediction_count=actual_count,
+        accuracy=sum(correct_values) / actual_count if actual_count else None,
+        brier_score=sum(brier_values) / actual_count if actual_count else None,
+        log_loss=sum(log_values) / actual_count if actual_count else None,
+        calibration=_calibration_buckets(predictions, mode=mode),
+    )
+
+
+def _variant_metrics(
+    predictions: list[BacktestGame],
+    probability_map: dict[int, float],
+    *,
+    key: str,
+    label: str,
+) -> BacktestModelMetrics:
+    selected = [row for row in predictions if row.game_pk in probability_map]
+    if not selected:
+        return BacktestModelMetrics(
+            key=key,
+            label=label,
+            prediction_count=0,
+            accuracy=None,
+            brier_score=None,
+            log_loss=None,
+            calibration=[],
+        )
+    correct = 0
+    briers: list[float] = []
+    logs: list[float] = []
+    buckets: list[BacktestCalibrationBucket] = []
+    pairs: list[tuple[float, bool, float]] = []
+    for row in selected:
+        home_probability = probability_map[row.game_pk]
+        winner = row.home_team if home_probability >= 0.5 else row.away_team
+        is_correct = winner == row.winner
+        correct += int(is_correct)
+        outcome = 1.0 if row.winner == row.home_team else 0.0
+        clipped = clip_probability(home_probability)
+        briers.append((home_probability - outcome) ** 2)
+        logs.append(-(outcome * math.log(clipped) + (1.0 - outcome) * math.log(1.0 - clipped)))
+        confidence = max(home_probability, 1.0 - home_probability)
+        pairs.append((confidence, is_correct, home_probability))
+    for lower, upper in [(0.50, 0.60), (0.60, 0.70), (0.70, 0.80), (0.80, 0.90), (0.90, 1.01)]:
+        values = [(confidence, is_correct) for confidence, is_correct, _ in pairs if lower <= confidence < upper]
+        buckets.append(
+            BacktestCalibrationBucket(
+                label=f"{lower:.0%}-{min(upper, 1.0):.0%}",
+                predictions=len(values),
+                mean_probability=sum(v for v, _ in values) / len(values) if values else None,
+                actual_rate=sum(1 for _, ok in values if ok) / len(values) if values else None,
+            )
+        )
+    count = len(selected)
     return BacktestModelMetrics(
         key=key,
         label=label,
         prediction_count=count,
-        accuracy=sum(correct_values) / count,
-        brier_score=sum(brier_values) / count,
-        log_loss=sum(log_values) / count,
-        calibration=_calibration_buckets(predictions, use_baseline=baseline),
+        accuracy=correct / count,
+        brier_score=sum(briers) / count,
+        log_loss=sum(logs) / count,
+        calibration=buckets,
     )
 
 
@@ -380,8 +450,36 @@ def evaluate_walk_forward_games(
     end_date: date,
     min_games: int = 10,
     prior_games: list[MlbGameState] | None = None,
+    training_games_by_season: dict[int, list[MlbGameState]] | None = None,
 ) -> BacktestResponse:
-    """Compare old and enhanced models using only data known before each game."""
+    """Compare v0.4, v0.5, and v0.6 using only pregame information."""
+    optimized_probability: dict[int, float] = {}
+    variant_probability_maps: dict[str, dict[int, float]] = {}
+    optimized_artifact = None
+    target_feature_rows = []
+    training_seasons: list[int] = []
+
+    required = (season - 3, season - 2, season - 1)
+    if training_games_by_season and all(year in training_games_by_season for year in required):
+        optimized_artifact, target_prior, target_elo = prepare_optimized_model(
+            seed_games=training_games_by_season[season - 3],
+            training_games=training_games_by_season[season - 2],
+            validation_games=training_games_by_season[season - 1],
+            min_games=min_games,
+        )
+        target_feature_rows, _ = build_target_rows(
+            games=games,
+            prior_summary=target_prior,
+            prior_elo=target_elo,
+            min_games=min_games,
+        )
+        training_seasons = [season - 2, season - 1]
+        for name, variant in optimized_artifact.variants.items():
+            variant_probability_maps[name] = {
+                row.game.game_pk: variant.predict(row.features) for row in target_feature_rows
+            }
+        optimized_probability = variant_probability_maps.get("Full", {})
+
     priors = _season_priors(prior_games or [])
     calibration_rows = _training_rows_from_prior_season(
         prior_games or [],
@@ -413,8 +511,10 @@ def evaluate_walk_forward_games(
                     totals, priors.league_runs_per_team_game
                 ),
             )
-            enhanced_home = calibrator.transform(raw_home)
-            enhanced_away = 1.0 - enhanced_home
+            v05_home = calibrator.transform(raw_home)
+            v05_away = 1.0 - v05_home
+            optimized_home = optimized_probability.get(game.game_pk, v05_home)
+            optimized_away = 1.0 - optimized_home
 
             winner = (
                 game.away_team
@@ -423,16 +523,14 @@ def evaluate_walk_forward_games(
             )
             home_outcome = 1.0 if winner == game.home_team else 0.0
 
-            predicted_winner = (
-                game.home_team if enhanced_home >= enhanced_away else game.away_team
-            )
-            predicted_probability = max(enhanced_home, enhanced_away)
-            baseline_winner = (
-                game.home_team if baseline_home >= baseline_away else game.away_team
-            )
+            predicted_winner = game.home_team if optimized_home >= 0.5 else game.away_team
+            predicted_probability = max(optimized_home, optimized_away)
+            v05_winner = game.home_team if v05_home >= 0.5 else game.away_team
+            v05_probability = max(v05_home, v05_away)
+            baseline_winner = game.home_team if baseline_home >= 0.5 else game.away_team
             baseline_probability = max(baseline_home, baseline_away)
-            clipped_home = clip_probability(enhanced_home)
-            brier = (enhanced_home - home_outcome) ** 2
+            clipped_home = clip_probability(optimized_home)
+            brier = (optimized_home - home_outcome) ** 2
             log_loss_value = -(
                 home_outcome * math.log(clipped_home)
                 + (1.0 - home_outcome) * math.log(1.0 - clipped_home)
@@ -446,8 +544,8 @@ def evaluate_walk_forward_games(
                     home_team=game.home_team,
                     away_score=game.away_score or 0,
                     home_score=game.home_score or 0,
-                    away_probability=enhanced_away,
-                    home_probability=enhanced_home,
+                    away_probability=optimized_away,
+                    home_probability=optimized_home,
                     predicted_winner=predicted_winner,
                     predicted_probability=predicted_probability,
                     winner=winner,
@@ -461,18 +559,21 @@ def evaluate_walk_forward_games(
                     baseline_correct=baseline_winner == winner,
                     raw_home_probability=raw_home,
                     calibrated=calibrator.fitted,
+                    enhanced_v05_away_probability=v05_away,
+                    enhanced_v05_home_probability=v05_home,
+                    enhanced_v05_predicted_winner=v05_winner,
+                    enhanced_v05_predicted_probability=v05_probability,
+                    enhanced_v05_correct=v05_winner == winner,
                 )
             )
 
-            # The current result is appended only after its prediction is frozen.
-            calibration_rows.append(
-                ProbabilityRow(probability=raw_home, outcome=home_outcome)
-            )
+            # v0.5 online calibration receives the current outcome only after prediction.
+            calibration_rows.append(ProbabilityRow(probability=raw_home, outcome=home_outcome))
             if len(calibration_rows) - rows_at_last_fit >= PLATT_REFIT_INTERVAL:
                 calibrator.fit(calibration_rows)
                 rows_at_last_fit = len(calibration_rows)
 
-        # Current scores become available to future games only here.
+        # Every model sees the current score only after its probability is frozen.
         away.add_game(game.away_score or 0, game.home_score or 0)
         home.add_game(game.home_score or 0, game.away_score or 0)
 
@@ -480,13 +581,39 @@ def evaluate_walk_forward_games(
         predictions,
         key="baseline",
         label="Old v0.4",
-        baseline=True,
+        mode="baseline",
     )
     enhanced_metrics = _metrics(
         predictions,
         key="enhanced",
         label="Enhanced v0.5",
+        mode="v05",
     )
+    optimized_metrics = _metrics(
+        predictions,
+        key="optimized",
+        label="Optimized v0.6",
+        mode="optimized",
+    )
+
+    ablations: list[BacktestModelMetrics] = []
+    if optimized_artifact:
+        labels = {
+            "Base": "Base only",
+            "Elo": "+ Elo",
+            "Form": "+ Form",
+            "Full": "Full v0.6",
+        }
+        for name in ("Base", "Elo", "Form", "Full"):
+            ablations.append(
+                _variant_metrics(
+                    predictions,
+                    variant_probability_maps.get(name, {}),
+                    key=name.lower(),
+                    label=labels[name],
+                )
+            )
+
     count = len(predictions)
     home_baseline = (
         sum(1 for row in predictions if row.winner == row.home_team) / count
@@ -497,12 +624,12 @@ def evaluate_walk_forward_games(
     accuracy_delta = None
     brier_delta = None
     log_loss_delta = None
-    if baseline_metrics.accuracy is not None and enhanced_metrics.accuracy is not None:
-        accuracy_delta = enhanced_metrics.accuracy - baseline_metrics.accuracy
-    if baseline_metrics.brier_score is not None and enhanced_metrics.brier_score is not None:
-        brier_delta = baseline_metrics.brier_score - enhanced_metrics.brier_score
-    if baseline_metrics.log_loss is not None and enhanced_metrics.log_loss is not None:
-        log_loss_delta = baseline_metrics.log_loss - enhanced_metrics.log_loss
+    if enhanced_metrics.accuracy is not None and optimized_metrics.accuracy is not None:
+        accuracy_delta = optimized_metrics.accuracy - enhanced_metrics.accuracy
+    if enhanced_metrics.brier_score is not None and optimized_metrics.brier_score is not None:
+        brier_delta = enhanced_metrics.brier_score - optimized_metrics.brier_score
+    if enhanced_metrics.log_loss is not None and optimized_metrics.log_loss is not None:
+        log_loss_delta = enhanced_metrics.log_loss - optimized_metrics.log_loss
 
     return BacktestResponse(
         generated_at=datetime.now(UTC),
@@ -513,18 +640,27 @@ def evaluate_walk_forward_games(
         min_games=min_games,
         completed_games=completed_games,
         prediction_count=count,
-        accuracy=enhanced_metrics.accuracy,
-        brier_score=enhanced_metrics.brier_score,
-        log_loss=enhanced_metrics.log_loss,
+        accuracy=optimized_metrics.accuracy,
+        brier_score=optimized_metrics.brier_score,
+        log_loss=optimized_metrics.log_loss,
         home_baseline_accuracy=home_baseline,
-        calibration=enhanced_metrics.calibration,
+        calibration=optimized_metrics.calibration,
         recent_predictions=list(reversed(predictions[-20:])),
         baseline=baseline_metrics,
         enhanced=enhanced_metrics,
+        optimized=optimized_metrics,
+        ablations=ablations,
         accuracy_delta=accuracy_delta,
         brier_delta=brier_delta,
         log_loss_delta=log_loss_delta,
         calibration_training_games=len(calibration_rows),
+        optimized_training_games=optimized_artifact.training_rows if optimized_artifact else 0,
+        optimized_validation_games=optimized_artifact.validation_rows if optimized_artifact else 0,
+        optimized_shrinkage=optimized_artifact.full.shrinkage if optimized_artifact else 0.0,
+        optimized_coefficients=(
+            optimized_artifact.full.model.coefficient_map() if optimized_artifact else {}
+        ),
+        training_seasons=training_seasons,
         leakage_audit=BacktestLeakageAudit(),
     )
 
@@ -535,7 +671,7 @@ async def build_mlb_backtest(
     through: date | None = None,
     min_games: int = 10,
 ) -> BacktestResponse:
-    """Fetch target and prior seasons, then run a strict chronological backtest."""
+    """Fetch three pre-target seasons and run an untouched target-season test."""
     today = datetime.now(EASTERN).date()
     season_start = date(season, 3, 1)
     default_end = date(season, 11, 15)
@@ -543,10 +679,6 @@ async def build_mlb_backtest(
         default_end = today - timedelta(days=1)
 
     end_date = through or default_end
-    prior_season = season - 1
-    prior_start = date(prior_season, 3, 1)
-    prior_end = date(prior_season, 11, 15)
-
     if end_date < season_start:
         return evaluate_walk_forward_games(
             [],
@@ -557,30 +689,43 @@ async def build_mlb_backtest(
             prior_games=[],
         )
 
-    timeout = httpx.Timeout(60.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.5.0 backtest"}
+    years = [season - 3, season - 2, season - 1]
+    timeout = httpx.Timeout(90.0, connect=10.0)
+    headers = {"User-Agent": "Moneyball-Predictions/0.6.0 backtest"}
+
+    async def fetch_year(client: httpx.AsyncClient, year: int) -> tuple[int, list[MlbGameState]]:
+        return (
+            year,
+            await fetch_mlb_regular_season_schedule(
+                client,
+                season=year,
+                start_date=date(year, 3, 1),
+                end_date=date(year, 11, 15),
+            ),
+        )
+
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
-            prior_games = await fetch_mlb_regular_season_schedule(
-                client,
-                season=prior_season,
-                start_date=prior_start,
-                end_date=prior_end,
-            )
-            games = await fetch_mlb_regular_season_schedule(
-                client,
-                season=season,
-                start_date=season_start,
-                end_date=end_date,
+            historical_pairs, games = await asyncio.gather(
+                asyncio.gather(*(fetch_year(client, year) for year in years)),
+                fetch_mlb_regular_season_schedule(
+                    client,
+                    season=season,
+                    start_date=season_start,
+                    end_date=end_date,
+                ),
             )
     except (httpx.HTTPError, MlbDataError) as exc:
         raise BacktestError(str(exc)) from exc
 
+    training_games = dict(historical_pairs)
     return evaluate_walk_forward_games(
         games,
         season=season,
         start_date=season_start,
         end_date=end_date,
         min_games=min_games,
-        prior_games=prior_games,
+        prior_games=training_games.get(season - 1, []),
+        training_games_by_season=training_games,
     )
+

@@ -31,8 +31,8 @@ STATIC_DIR = PACKAGE_DIR / "static"
 
 app = FastAPI(
     title="Moneyball Predictions API",
-    version="0.5.0",
-    description="MLB predictions, paper trading, scores, and leakage-safe model comparison.",
+    version="0.6.0",
+    description="MLB predictions, paper trading, scores, and leakage-safe optimized model comparison.",
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

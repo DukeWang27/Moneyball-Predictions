@@ -1,41 +1,52 @@
-# Moneyball Predictions v0.5.0
+# Moneyball Predictions v0.6.0
 
-A local MLB sabermetric research dashboard combining official MLB schedules and scores with executable Polymarket pregame moneyline asks.
+A local MLB prediction, Polymarket paper-trading, and leakage-safe model research dashboard.
 
-## What v0.5.0 changes
+## What v0.6 changes
 
-The history panel now compares two models on the exact same games:
+The live board and historical test now use the same optimized pregame model when the training data loads successfully.
 
-- **Old v0.4:** current-season runs scored/allowed, Pythagorean expectation, and Log5.
-- **Enhanced v0.5:** previous-season regression, league-average shrinkage, a home-field adjustment, and Platt probability calibration trained only on previously completed games.
+The optimized model combines:
 
-The page reports Accuracy, Brier, Log loss, calibration buckets, recent predictions, and the improvement or decline versus the old model.
+- prior-regressed Pythagorean/Log5 team strength;
+- carried and offseason-regressed Elo ratings;
+- last-10 and last-30 run differential;
+- last-10 win rate;
+- days-of-rest difference;
+- L2-regularized logistic regression;
+- conservative probability shrinkage chosen on the season before the test season.
 
-## Leakage controls
+For a 2026 backtest, the model uses:
 
-Historical games are sorted by exact game timestamp. For each game the code:
+```text
+2023: seed priors and Elo
+2024: model training
+2025: validation and probability-shrinkage selection
+2026: untouched target-season evaluation
+```
 
-1. reads only statistics from earlier completed games;
-2. creates and stores the prediction;
-3. grades the frozen prediction against the final result;
-4. only then adds the current score to running team totals;
-5. updates the calibrator only after the prediction has been graded.
+The 2026 result never trains the v0.6 coefficients. Within every season, a game is predicted before its score updates Elo, rolling form, or team totals.
 
-Previous-season final data may be used because it was already known before the target season began. The current game's result and every future result are excluded from its prediction.
+## New model-lab output
 
-## Important interpretation
+The history section displays:
 
-v0.5.0 is an experiment, not a promise that the enhanced model wins. The comparison panel is the acceptance test. Keep the new model only if it improves probability metrics on untouched seasons, especially Brier and Log loss.
+- Optimized v0.6 metrics;
+- Enhanced v0.5 metrics;
+- Old v0.4 metrics;
+- ablation results for Base, Elo, Form, and Full versions;
+- standardized feature weights;
+- calibration buckets;
+- a visible leakage audit;
+- recent side-by-side predictions from all three versions.
 
-The live board now uses previous-season regression plus home field, but it still does not include starting-pitcher quality, bullpen fatigue, lineups, park factors, or weather.
+The live response displays `v0.6.0` when the optimized model is active. If historical model data cannot load, the app explicitly reports `v0.5 fallback` instead of pretending the optimized model ran.
 
-`BET` clears the configured edge and ROI thresholds. `LEAN` is informational only and does not get a paper-bet button.
-
-## Upgrade an existing Desktop checkout
+## Upgrade an existing checkout
 
 ```bash
 cd ~/Desktop/baseball/Moneyball-Predictions
-unzip -o ~/Downloads/moneyball-polymarket-v0.5.0.zip -d .
+unzip -o ~/Downloads/moneyball-polymarket-v0.6.0.zip -d .
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ruff check .
@@ -43,17 +54,17 @@ pytest -q
 python -m uvicorn moneyball_predictions.api:app --reload
 ```
 
-Open `http://127.0.0.1:8000` and hard refresh with `Command + Shift + R`.
+Open `http://127.0.0.1:8000` and hard-refresh with `Command + Shift + R`.
 
-The page header must say `v0.5.0`.
+The first refresh may take longer because the optimized model downloads the three pre-target regular seasons. The trained live context is cached for 20 minutes.
 
-## Historical API
+## Recommendation rules
 
-```text
-http://127.0.0.1:8000/api/v1/backtest/mlb?season=2026&min_games=10
-```
+- `BET`: at least 5% edge and 5% expected ROI at the executable ask.
+- `LEAN`: positive expected value but below the bet thresholds; do not place a paper bet.
+- `PASS`: no positive expected value.
 
-The response includes `baseline`, `enhanced`, metric deltas, and `leakage_audit`.
+Kelly sizing remains experimental. Quarter Kelly is the default, and the suggested paper stake is capped by available cash and top-of-book depth.
 
 ## Tests
 
@@ -62,11 +73,11 @@ ruff check .
 pytest -q
 ```
 
-Expected result for this package:
+Expected:
 
 ```text
 All checks passed!
-37 passed
+41 passed
 ```
 
 ## Git workflow
@@ -74,10 +85,14 @@ All checks passed!
 ```bash
 git status
 git add .
-git commit -m "Add leakage-safe enhanced model comparison"
+git commit -m "Add leakage-safe Elo and rolling-form model"
 git push
 ```
 
+## Current limitation
+
+v0.6 improves the team-level statistical model but does not yet include historically timestamped starting-pitcher, bullpen, lineup, park, or weather inputs. Those features should only be added when their historical values can be reconstructed as they were known before first pitch.
+
 ## Disclaimer
 
-Research and paper trading only. Kelly sizing is only as reliable as the probability estimate. Keep stakes small until the enhanced model proves lower out-of-sample Brier and Log loss than both the old model and the market baseline.
+Research and paper trading only. Historical improvement does not guarantee future profitability, and Kelly sizing can be unsafe when probabilities are miscalibrated.

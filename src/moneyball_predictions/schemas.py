@@ -85,8 +85,9 @@ class LiveGamePrediction(BaseModel):
     recommendation_reason: str
     liquidity: float | None = None
     volume: float | None = None
+    model_version: str = "v0.6.0"
     methodology: str = (
-        "Prior-regressed run differential + Log5 + home field; pitcher adjustment pending"
+        "Regularized logistic model using prior-regressed strength, Elo, rolling form, and rest"
     )
 
 
@@ -147,6 +148,9 @@ class MatchingDiagnostics(BaseModel):
 class LiveMlbResponse(BaseModel):
     generated_at: datetime
     season: int
+    model_version: str = "v0.6.0"
+    model_training_rows: int = 0
+    model_validation_rows: int = 0
     bankroll: float
     kelly_multiplier: float
     date_window_start: str
@@ -181,10 +185,13 @@ class BacktestLeakageAudit(BaseModel):
     current_game_excluded: bool = True
     prior_season_only_for_priors: bool = True
     calibrator_uses_past_only: bool = True
+    coefficients_trained_before_target_season: bool = True
+    rolling_features_shifted: bool = True
     passed: bool = True
     note: str = (
         "Each prediction is created before the current final score is added. Priors use the "
-        "previous season, and calibration uses only earlier settled predictions."
+        "previous season, rolling features are shifted, and v0.6 coefficients are trained "
+        "before the target season."
     )
 
 
@@ -210,6 +217,11 @@ class BacktestGame(BaseModel):
     baseline_correct: bool | None = None
     raw_home_probability: float | None = None
     calibrated: bool = False
+    enhanced_v05_away_probability: float | None = None
+    enhanced_v05_home_probability: float | None = None
+    enhanced_v05_predicted_winner: str | None = None
+    enhanced_v05_predicted_probability: float | None = None
+    enhanced_v05_correct: bool | None = None
 
 
 class BacktestResponse(BaseModel):
@@ -229,12 +241,19 @@ class BacktestResponse(BaseModel):
     recent_predictions: list[BacktestGame]
     baseline: BacktestModelMetrics
     enhanced: BacktestModelMetrics
+    optimized: BacktestModelMetrics
+    ablations: list[BacktestModelMetrics] = Field(default_factory=list)
     accuracy_delta: float | None = None
     brier_delta: float | None = None
     log_loss_delta: float | None = None
     calibration_training_games: int = 0
+    optimized_training_games: int = 0
+    optimized_validation_games: int = 0
+    optimized_shrinkage: float = 0.0
+    optimized_coefficients: dict[str, float] = Field(default_factory=dict)
+    training_seasons: list[int] = Field(default_factory=list)
     leakage_audit: BacktestLeakageAudit = Field(default_factory=BacktestLeakageAudit)
     methodology: str = (
-        "Leakage-safe walk-forward comparison: old Pythagorean + Log5 versus a prior-"
-        "regressed, home-adjusted, past-only calibrated model"
+        "Leakage-safe comparison of v0.4, v0.5, and a v0.6 regularized logistic model "
+        "trained before the target season using Elo, rolling form, rest, and regressed strength"
     )

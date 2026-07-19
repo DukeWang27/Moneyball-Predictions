@@ -102,9 +102,9 @@
 <main>
   <div class="topbar">
     <section>
-      <div class="eyebrow">MLB · Polymarket board + model lab · v0.5.0</div>
-      <h1>Live markets, saved paper bets, and honest model comparison.</h1>
-      <p class="lede">Games stay in official first-pitch order. The model lab compares the old formula with a prior-regressed, home-adjusted, past-only calibrated version without letting any game see its own result.</p>
+      <div class="eyebrow">MLB · Polymarket board + model lab · v0.6.0</div>
+      <h1>Live markets, saved paper bets, and an optimized pregame model.</h1>
+      <p class="lede">Games stay in official first-pitch order. The model lab now compares v0.4, v0.5, and a regularized v0.6 model trained before the target season with Elo, rolling form, rest, and regressed team strength.</p>
     </section>
     <aside class="controls">
       <label for="kelly">Kelly sizing</label>
@@ -160,15 +160,21 @@
       </div>
     </div>
     <div id="backtest-status" class="muted">Loading historical results…</div>
-    <h3>Enhanced v0.5</h3>
+    <h3>Optimized v0.6</h3>
     <div id="backtest-metrics" class="summary-grid" style="margin-top:12px"></div>
+    <h3>Enhanced v0.5</h3>
+    <div id="enhanced-metrics" class="summary-grid" style="margin-top:12px"></div>
     <h3>Old v0.4</h3>
     <div id="baseline-metrics" class="summary-grid" style="margin-top:12px"></div>
     <div id="model-change" class="notice" style="margin-top:12px"></div>
     <div class="history-note">Accuracy = winner picks. Brier = probability error: lower is better, 0 is perfect, and 0.25 is coin-flip level. Log loss = confidence penalty. Historical betting ROI still requires archived pregame odds.</div>
+    <h3>Ablation</h3>
+    <div id="ablation-table"></div>
+    <h3>Drivers</h3>
+    <div id="coefficient-table"></div>
     <h3>Leakage check</h3>
     <div id="leakage-audit" class="notice"></div>
-    <h3>Enhanced calibration</h3>
+    <h3>Optimized calibration</h3>
     <div id="calibration"></div>
     <h3>Recent predictions</h3>
     <div id="historical-games"></div>
@@ -179,7 +185,7 @@
     <div id="diagnostics" class="notice"></div>
   </details>
 
-  <div class="notice section"><strong>Kelly sizing:</strong> still experimental. Use the model comparison above first. Quarter Kelly remains the maximum default, and suggested stakes are capped to available cash and visible best-ask depth.</div>
+  <div class="notice section"><strong>Kelly sizing:</strong> still experimental. The live board now uses v0.6 when its historical training data loads; quarter Kelly remains the maximum default and stakes are capped to cash and visible best-ask depth.</div>
   <footer>Paper-trading research only. Open the linked event to place an actual Polymarket trade. The app does not store wallet credentials or submit real-money orders.</footer>
 </main>
 <script>
@@ -468,22 +474,37 @@
   }
 
   function renderBacktest(data) {
-    byId('backtest-metrics').innerHTML = metricCards(data.enhanced, data.home_baseline_accuracy);
+    byId('backtest-metrics').innerHTML = metricCards(data.optimized, data.home_baseline_accuracy);
+    byId('enhanced-metrics').innerHTML = metricCards(data.enhanced);
     byId('baseline-metrics').innerHTML = metricCards(data.baseline);
     byId('model-change').innerHTML = `
-      <strong>Change versus old model</strong><br>
+      <strong>Change versus v0.5</strong><br>
       Accuracy: ${deltaText(data.accuracy_delta, 'accuracy')} ·
       Brier improvement: ${deltaText(data.brier_delta, 'brier')} ·
       Log-loss improvement: ${deltaText(data.log_loss_delta, 'log')}<br>
-      <span class="muted">Positive Brier and log-loss changes mean the enhanced model made smaller probability errors.</span>`;
+      <span class="muted">Positive changes mean v0.6 improved. The coefficients were trained before ${data.season}; the target season was not used to choose them.</span>`;
+
+    const ablationRows = (data.ablations || []).map(model => `
+      <tr><td>${esc(model.label)}</td><td>${model.accuracy == null ? '—' : pct(model.accuracy)}</td><td>${model.brier_score == null ? '—' : Number(model.brier_score).toFixed(3)}</td><td>${model.log_loss == null ? '—' : Number(model.log_loss).toFixed(3)}</td><td>${model.prediction_count}</td></tr>`).join('');
+    byId('ablation-table').innerHTML = ablationRows
+      ? `<div class="table-wrap"><table><thead><tr><th>Model</th><th>Accuracy</th><th>Brier</th><th>Log loss</th><th>Games</th></tr></thead><tbody>${ablationRows}</tbody></table></div>`
+      : '<div class="notice">Ablations require the three pre-target training seasons.</div>';
+
+    const coefficientRows = Object.entries(data.optimized_coefficients || {}).map(([name, value]) => `
+      <tr><td>${esc(name)}</td><td>${Number(value).toFixed(3)}</td><td>${Number(value) > 0 ? 'Home' : Number(value) < 0 ? 'Away' : 'Flat'}</td></tr>`).join('');
+    byId('coefficient-table').innerHTML = coefficientRows
+      ? `<div class="table-wrap"><table><thead><tr><th>Driver</th><th>Weight</th><th>Direction</th></tr></thead><tbody>${coefficientRows}</tbody></table></div><div class="history-note">Weights use standardized inputs, so larger absolute values indicate stronger influence within this model. They do not prove causation.</div>`
+      : '<div class="notice">No trained v0.6 coefficients were available.</div>';
 
     const audit = data.leakage_audit || {};
     const checks = [
-      ['Time order', audit.chronological_order],
-      ['Predict first', audit.prediction_before_result_update],
-      ['Game excluded', audit.current_game_excluded],
-      ['Prior season', audit.prior_season_only_for_priors],
-      ['Past calibration', audit.calibrator_uses_past_only],
+      ['Time', audit.chronological_order],
+      ['Predict', audit.prediction_before_result_update],
+      ['Excluded', audit.current_game_excluded],
+      ['Priors', audit.prior_season_only_for_priors],
+      ['Calibration', audit.calibrator_uses_past_only],
+      ['Training', audit.coefficients_trained_before_target_season],
+      ['Shifted', audit.rolling_features_shifted],
     ];
     byId('leakage-audit').innerHTML = `<strong class="${audit.passed ? 'positive' : 'negative'}">${audit.passed ? 'PASS' : 'FAIL'}</strong> · ${checks.map(([name, ok]) => `${esc(name)}: <strong class="${ok ? 'positive' : 'negative'}">${ok ? 'Yes' : 'No'}</strong>`).join(' · ')}<br><span class="muted">${esc(audit.note || '')}</span>`;
 
@@ -492,12 +513,12 @@
     byId('calibration').innerHTML = `<div class="table-wrap"><table><thead><tr><th>Range</th><th>Forecast</th><th>Actual</th><th>Games</th></tr></thead><tbody>${calibrationRows}</tbody></table></div>`;
 
     const rows = data.recent_predictions.map(game => `
-      <tr><td>${new Date(game.game_date).toLocaleDateString()}</td><td>${esc(game.away_team)} ${game.away_score}–${game.home_score} ${esc(game.home_team)}</td><td>${esc(game.predicted_winner)} ${pct(game.predicted_probability)}</td><td>${esc(game.baseline_predicted_winner || '—')} ${game.baseline_predicted_probability == null ? '' : pct(game.baseline_predicted_probability)}</td><td class="${game.correct ? 'positive' : 'negative'}">${game.correct ? 'Correct' : 'Wrong'}</td></tr>`).join('');
+      <tr><td>${new Date(game.game_date).toLocaleDateString()}</td><td>${esc(game.away_team)} ${game.away_score}–${game.home_score} ${esc(game.home_team)}</td><td>${esc(game.predicted_winner)} ${pct(game.predicted_probability)}</td><td>${esc(game.enhanced_v05_predicted_winner || '—')} ${game.enhanced_v05_predicted_probability == null ? '' : pct(game.enhanced_v05_predicted_probability)}</td><td>${esc(game.baseline_predicted_winner || '—')} ${game.baseline_predicted_probability == null ? '' : pct(game.baseline_predicted_probability)}</td><td class="${game.correct ? 'positive' : 'negative'}">${game.correct ? 'Correct' : 'Wrong'}</td></tr>`).join('');
     byId('historical-games').innerHTML = rows
-      ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Result</th><th>Enhanced</th><th>Old</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Result</th><th>v0.6</th><th>v0.5</th><th>v0.4</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table></div>`
       : '<div class="notice">Not enough completed games after the selected warmup.</div>';
-    const priorText = data.prior_season ? ` · priors and initial calibration from ${data.prior_season}` : '';
-    byId('backtest-status').textContent = `${data.season} through ${data.end_date} · ${data.completed_games} finals · ${data.prediction_count} predictions after ${data.min_games} prior games per team${priorText}.`;
+    const trainingText = (data.training_seasons || []).length ? ` · trained on ${data.training_seasons.join(' + ')}` : '';
+    byId('backtest-status').textContent = `${data.season} through ${data.end_date} · ${data.completed_games} finals · ${data.prediction_count} predictions after ${data.min_games} prior games per team${trainingText} · shrink ${Number(data.optimized_shrinkage || 0).toFixed(2)}.`;
   }
 
   async function loadBacktest() {
@@ -515,8 +536,11 @@
     } catch (error) {
       byId('backtest-status').innerHTML = `<span class="negative">${esc(error.message)}</span>`;
       byId('backtest-metrics').innerHTML = '';
+      byId('enhanced-metrics').innerHTML = '';
       byId('baseline-metrics').innerHTML = '';
       byId('model-change').innerHTML = '';
+      byId('ablation-table').innerHTML = '';
+      byId('coefficient-table').innerHTML = '';
       byId('leakage-audit').innerHTML = '';
       byId('calibration').innerHTML = '';
       byId('historical-games').innerHTML = '';
@@ -558,7 +582,7 @@
       byId('games').innerHTML = renderMarkets(data.games);
       renderDiagnostics(data.diagnostics);
       const kellyName = kelly === 1 ? 'full' : kelly === 0.5 ? 'half' : 'quarter';
-      byId('status').textContent = `${data.scoreboard.length} official games · ${data.games.length} priced markets · ${data.recommended_bets.length} BET signals · ${kellyName} Kelly · Updated ${new Date(data.generated_at).toLocaleTimeString()}`;
+      byId('status').textContent = `${data.scoreboard.length} official games · ${data.games.length} priced markets · ${data.recommended_bets.length} BET signals · ${data.model_version} · ${kellyName} Kelly · Updated ${new Date(data.generated_at).toLocaleTimeString()}`;
       await settlePaperBets(data.scoreboard);
     } catch (error) {
       byId('status').textContent = 'Live refresh failed.';
