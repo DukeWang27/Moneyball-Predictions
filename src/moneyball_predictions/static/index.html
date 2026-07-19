@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Moneyball Predictions</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #080b10; color: #f7f8fa; }
+    main { width: min(1100px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 72px; }
+    .eyebrow { color: #8da2bd; text-transform: uppercase; letter-spacing: .14em; font-size: 12px; }
+    h1 { font-size: clamp(36px, 7vw, 70px); line-height: .98; margin: 10px 0 16px; max-width: 850px; }
+    .lede { color: #aeb9c9; max-width: 700px; font-size: 18px; line-height: 1.55; }
+    .panel { background: #111722; border: 1px solid #263247; border-radius: 18px; padding: 22px; margin-top: 28px; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+    .team { background: #0b1018; border: 1px solid #202b3d; border-radius: 14px; padding: 18px; }
+    h2, h3 { margin-top: 0; }
+    label { display: block; color: #aeb9c9; font-size: 13px; margin: 12px 0 6px; }
+    input { width: 100%; border: 1px solid #35445d; border-radius: 9px; background: #0a0f17; color: white; padding: 11px 12px; font-size: 15px; }
+    .row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .market-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-top: 16px; }
+    button { width: 100%; margin-top: 18px; border: 0; border-radius: 10px; padding: 14px 18px; background: #f5f7fb; color: #0a0d12; font-weight: 800; font-size: 15px; cursor: pointer; }
+    button:hover { opacity: .9; }
+    .results { display: none; }
+    .result-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+    .result-card { border: 1px solid #29364b; border-radius: 14px; padding: 18px; background: #0b1018; }
+    .metric { display: flex; justify-content: space-between; gap: 16px; padding: 9px 0; border-bottom: 1px solid #1c2635; }
+    .metric:last-child { border-bottom: 0; }
+    .metric span:first-child { color: #9eadc0; }
+    .positive { color: #73e6a1; }
+    .negative { color: #ff8d92; }
+    .recommendation { margin-top: 18px; padding: 14px; border-radius: 10px; background: #151e2b; font-weight: 750; }
+    .error { color: #ff8d92; margin-top: 14px; white-space: pre-wrap; }
+    footer { color: #77869a; margin-top: 34px; font-size: 13px; }
+    @media (max-width: 780px) { .grid, .result-grid, .market-row { grid-template-columns: 1fr; } .row { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">MLB research dashboard · MVP 0.1</div>
+  <h1>Model the game. Price the edge.</h1>
+  <p class="lede">Enter season run totals and two-way decimal odds. The MVP calculates dynamic Pythagorean strength, applies Log5, removes sportsbook overround, and shows expected value.</p>
+
+  <form id="prediction-form" class="panel">
+    <div class="grid">
+      <section class="team">
+        <h2>Team A</h2>
+        <label for="a-name">Name</label><input id="a-name" value="New York Yankees" required />
+        <div class="row">
+          <div><label for="a-rs">Runs scored</label><input id="a-rs" type="number" min="0" value="510" required /></div>
+          <div><label for="a-ra">Runs allowed</label><input id="a-ra" type="number" min="0" value="430" required /></div>
+          <div><label for="a-g">Games</label><input id="a-g" type="number" min="1" value="100" required /></div>
+        </div>
+      </section>
+      <section class="team">
+        <h2>Team B</h2>
+        <label for="b-name">Name</label><input id="b-name" value="Boston Red Sox" required />
+        <div class="row">
+          <div><label for="b-rs">Runs scored</label><input id="b-rs" type="number" min="0" value="470" required /></div>
+          <div><label for="b-ra">Runs allowed</label><input id="b-ra" type="number" min="0" value="460" required /></div>
+          <div><label for="b-g">Games</label><input id="b-g" type="number" min="1" value="100" required /></div>
+        </div>
+      </section>
+    </div>
+    <div class="market-row">
+      <div><label for="a-odds">Team A decimal odds</label><input id="a-odds" type="number" min="1.01" step="0.01" value="1.75" required /></div>
+      <div><label for="b-odds">Team B decimal odds</label><input id="b-odds" type="number" min="1.01" step="0.01" value="2.20" required /></div>
+      <div><label for="stake">Paper stake ($)</label><input id="stake" type="number" min="0.01" step="0.01" value="10" required /></div>
+    </div>
+    <button type="submit">Calculate prediction</button>
+    <div id="error" class="error"></div>
+  </form>
+
+  <section id="results" class="panel results">
+    <h2>Model output</h2>
+    <div id="result-grid" class="result-grid"></div>
+    <div id="recommendation" class="recommendation"></div>
+  </section>
+
+  <footer>This is a research and paper-trading project, not financial advice. Starting-pitcher, park, recency, bullpen, weather, live odds, and backtesting layers are intentionally not included yet.</footer>
+</main>
+<script>
+  const byId = (id) => document.getElementById(id);
+  const number = (id) => Number(byId(id).value);
+  const pct = (value) => `${(value * 100).toFixed(2)}%`;
+  const money = (value) => `${value >= 0 ? '+' : '-'}$${Math.abs(value).toFixed(2)}`;
+
+  function sideCard(side) {
+    const edgeClass = side.edge >= 0 ? 'positive' : 'negative';
+    const evClass = side.expected_value >= 0 ? 'positive' : 'negative';
+    return `<article class="result-card">
+      <h3>${side.team}</h3>
+      <div class="metric"><span>Model probability</span><strong>${pct(side.model_probability)}</strong></div>
+      <div class="metric"><span>No-vig market probability</span><strong>${pct(side.market_probability)}</strong></div>
+      <div class="metric"><span>Model edge</span><strong class="${edgeClass}">${pct(side.edge)}</strong></div>
+      <div class="metric"><span>Expected value</span><strong class="${evClass}">${money(side.expected_value)}</strong></div>
+    </article>`;
+  }
+
+  byId('prediction-form').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    byId('error').textContent = '';
+    const payload = {
+      team_a: { name: byId('a-name').value, runs_scored: number('a-rs'), runs_allowed: number('a-ra'), games_played: number('a-g') },
+      team_b: { name: byId('b-name').value, runs_scored: number('b-rs'), runs_allowed: number('b-ra'), games_played: number('b-g') },
+      decimal_odds_a: number('a-odds'),
+      decimal_odds_b: number('b-odds'),
+      stake: number('stake')
+    };
+
+    try {
+      const response = await fetch('/api/v1/predict', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(JSON.stringify(data, null, 2));
+      byId('result-grid').innerHTML = sideCard(data.side_a) + sideCard(data.side_b);
+      byId('recommendation').textContent = data.recommended_side
+        ? `Positive-EV side at these inputs: ${data.recommended_side}`
+        : 'No positive-EV side at these inputs. The model says pass.';
+      byId('results').style.display = 'block';
+      byId('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (error) {
+      byId('error').textContent = `Could not calculate prediction: ${error.message}`;
+    }
+  });
+</script>
+</body>
+</html>
