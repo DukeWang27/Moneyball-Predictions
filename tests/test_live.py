@@ -104,3 +104,38 @@ def test_live_scoreboard_explicitly_disables_live_bet_signal() -> None:
     assert row.abstract_state == "Live"
     assert "No live bet signal" in row.live_bet_message
     assert row.away_score == 3
+
+
+def test_sabermetric_support_requires_independent_driver_agreement() -> None:
+    from moneyball_predictions.live import _sabermetric_support_for_team
+    from moneyball_predictions.mlb import MlbGameState
+
+    game = MlbGameState(
+        game_pk=9,
+        game_date="2026-07-20T20:00:00Z",
+        official_date="2026-07-20",
+        away_team="Away Club",
+        home_team="Home Club",
+        away_score=None,
+        home_score=None,
+        abstract_state="Preview",
+        detailed_state="Scheduled",
+        coded_state="S",
+        current_inning=None,
+        inning_state=None,
+        inning_ordinal=None,
+        away_probable_pitcher="Away Pitcher",
+        home_probable_pitcher="Home Pitcher",
+        venue="Test Park",
+    )
+    features = (0.2, 0.0, 0.0, 0.10, 0.0, 0.0, 0.0, 0.0, 0.0, 0.01, 0.2, 0.0, 0.0, 0.0)
+    label, count, total, reasons = _sabermetric_support_for_team(
+        team="Home Club",
+        game=game,
+        own_strength=0.56,
+        opponent_strength=0.46,
+        features=features,
+    )
+    assert label == "CONFIRMED"
+    assert count == total == 3
+    assert len(reasons) == 3

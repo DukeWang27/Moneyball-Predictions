@@ -1,98 +1,58 @@
-# Moneyball Predictions v0.6.0
+# Moneyball Predictions v0.9.1
 
-A local MLB prediction, Polymarket paper-trading, and leakage-safe model research dashboard.
+Local FastAPI dashboard for MLB pregame prediction, live Polymarket moneyline comparison, browser paper trading, and archived edge-performance research.
 
-## What v0.6 changes
+## v0.9.1 changes
 
-The live board and historical test now use the same optimized pregame model when the training data loads successfully.
+- Keeps economic edge separate from sabermetric confirmation.
+- Grades each side as `A`, `B`, `C`, `LEAN`, or `PASS`.
+- `A` means the price thresholds clear and independent team-strength, starter, and material park drivers are confirmed.
+- Adds a paper-bet filter that can require sabermetric confirmation.
+- Continues preventing duplicate paper bets on the same game.
+- Archives model drivers and support labels with every pregame market snapshot.
+- Adds an Edge Performance dashboard using honest T-15, T-60, T-6h, or T-24h entry snapshots.
+- Reports settled sample size, win rate, flat-stake ROI, profit per $1, Brier score, CLV, positive-CLV rate, and maximum drawdown by edge threshold.
+- Compares all economic edges with the stricter sabermetric-confirmed strategy.
 
-The optimized model combines:
+Bill James-style Pythagorean expectation and Log5 help estimate fair probability. They do not replace market price: a strong team can still be a bad bet when the contract costs too much.
 
-- prior-regressed Pythagorean/Log5 team strength;
-- carried and offseason-regressed Elo ratings;
-- last-10 and last-30 run differential;
-- last-10 win rate;
-- days-of-rest difference;
-- L2-regularized logistic regression;
-- conservative probability shrinkage chosen on the season before the test season.
-
-For a 2026 backtest, the model uses:
-
-```text
-2023: seed priors and Elo
-2024: model training
-2025: validation and probability-shrinkage selection
-2026: untouched target-season evaluation
-```
-
-The 2026 result never trains the v0.6 coefficients. Within every season, a game is predicted before its score updates Elo, rolling form, or team totals.
-
-## New model-lab output
-
-The history section displays:
-
-- Optimized v0.6 metrics;
-- Enhanced v0.5 metrics;
-- Old v0.4 metrics;
-- ablation results for Base, Elo, Form, and Full versions;
-- standardized feature weights;
-- calibration buckets;
-- a visible leakage audit;
-- recent side-by-side predictions from all three versions.
-
-The live response displays `v0.6.0` when the optimized model is active. If historical model data cannot load, the app explicitly reports `v0.5 fallback` instead of pretending the optimized model ran.
-
-## Upgrade an existing checkout
+## Install
 
 ```bash
 cd ~/Desktop/baseball/Moneyball-Predictions
-unzip -o ~/Downloads/moneyball-polymarket-v0.6.0.zip -d .
+unzip -o ~/Downloads/moneyball-polymarket-v0.9.1.zip -d .
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ruff check .
 pytest -q
+```
+
+Expected test result: `53 passed`.
+
+## Historical pitching cache
+
+```bash
+python scripts/fetch_pitching_data.py --seasons 2021 2022 2023 2024 2025 2026
+```
+
+The command is resumable. Existing box scores are skipped.
+
+## Run
+
+```bash
 python -m uvicorn moneyball_predictions.api:app --reload
 ```
 
-Open `http://127.0.0.1:8000` and hard-refresh with `Command + Shift + R`.
+Open `http://127.0.0.1:8000` and hard refresh with `Command + Shift + R`.
 
-The first refresh may take longer because the optimized model downloads the three pre-target regular seasons. The trained live context is cached for 20 minutes.
+## Edge performance
 
-## Recommendation rules
+The app already writes append-only snapshots to `data/market_snapshots/`. Edge Performance selects one snapshot before the requested horizon and the last pregame snapshot as the closing benchmark.
 
-- `BET`: at least 5% edge and 5% expected ROI at the executable ask.
-- `LEAN`: positive expected value but below the bet thresholds; do not place a paper bet.
-- `PASS`: no positive expected value.
+- Entry ask determines whether the strategy would bet and its realized ROI.
+- Closing no-vig midpoint is used only for CLV.
+- Final score settles the signal.
+- Games without an honestly archived snapshot before the requested horizon are omitted.
+- Older snapshots without v0.9.1 support labels can appear under `All economic edges`, but not under `Sabermetric confirmed`.
 
-Kelly sizing remains experimental. Quarter Kelly is the default, and the suggested paper stake is capped by available cash and top-of-book depth.
-
-## Tests
-
-```bash
-ruff check .
-pytest -q
-```
-
-Expected:
-
-```text
-All checks passed!
-41 passed
-```
-
-## Git workflow
-
-```bash
-git status
-git add .
-git commit -m "Add leakage-safe Elo and rolling-form model"
-git push
-```
-
-## Current limitation
-
-v0.6 improves the team-level statistical model but does not yet include historically timestamped starting-pitcher, bullpen, lineup, park, or weather inputs. Those features should only be added when their historical values can be reconstructed as they were known before first pitch.
-
-## Disclaimer
-
-Research and paper trading only. Historical improvement does not guarantee future profitability, and Kelly sizing can be unsafe when probabilities are miscalibrated.
+Meaningful conclusions require a much larger settled sample. Do not interpret a few games as proof of profitability.

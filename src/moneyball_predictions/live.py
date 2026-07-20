@@ -10,9 +10,12 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from .market_archive import append_market_snapshots
 from .mlb import (
     MlbDataError,
     MlbGameState,
+    attach_boxscore_payload,
+    fetch_mlb_boxscore,
     fetch_mlb_game,
     fetch_mlb_regular_season_schedule,
     fetch_mlb_schedule,
@@ -28,7 +31,7 @@ from .optimized import (
     OptimizedModelArtifact,
     SeasonFeatureEngine,
     build_target_rows,
-    prepare_optimized_model,
+    prepare_optimized_model_multifold,
 )
 from .polymarket import (
     MarketDiagnostic,
@@ -50,6 +53,8 @@ EASTERN = ZoneInfo("America/New_York")
 MIN_BET_EDGE = 0.05
 MIN_BET_ROI = 0.05
 MODEL_CACHE_MINUTES = 20
+MAX_PAPER_STAKE_FRACTION = 0.01
+MIN_COMPONENT_COVERAGE = 0.70
 
 
 @dataclass
@@ -86,7 +91,22 @@ def _market_side(
     bankroll: float,
     kelly_multiplier: float,
     ask_size: float | None,
+    *,
+    sabermetric_support: str = "UNKNOWN",
+    sabermetric_support_count: int = 0,
+    sabermetric_support_total: int = 0,
+    sabermetric_reasons: list[str] | None = None,
 ) -> LiveMarketSide:
+    risk_capped = (
+        prediction_market_kelly_stake(
+            model_probability=model_probability,
+            buy_price=ask_price,
+            bankroll=bankroll,
+            multiplier=kelly_multiplier,
+            top_ask_size=None,
+        )[2]
+        > MAX_PAPER_STAKE_FRACTION
+    )
     kelly_stake, full_kelly, applied_kelly, capped_by_depth = (
         prediction_market_kelly_stake(
             model_probability=model_probability,
@@ -94,6 +114,7 @@ def _market_side(
             bankroll=bankroll,
             multiplier=kelly_multiplier,
             top_ask_size=ask_size,
+            max_bankroll_fraction=MAX_PAPER_STAKE_FRACTION,
         )
     )
     expected_roi = prediction_market_expected_value(model_probability, ask_price, 1.0)
@@ -117,8 +138,74 @@ def _market_side(
         price_source="CLOB best ask",
         top_ask_size=ask_size,
         kelly_capped_by_depth=capped_by_depth,
+        kelly_capped_by_risk=risk_capped,
+        sabermetric_support=sabermetric_support,
+        sabermetric_support_count=sabermetric_support_count,
+        sabermetric_support_total=sabermetric_support_total,
+        sabermetric_reasons=sabermetric_reasons or [],
+        value_grade="PASS",
     )
 
+
+
+def _sabermetric_support_for_team(
+    *,
+    team: str,
+    game: MlbGameState,
+    own_strength: float,
+    opponent_strength: float,
+    features: tuple[float, ...] | None,
+) -> tuple[str, int, int, list[str]]:
+    """Summarize whether independent baseball driver groups support a side.
+
+    This is a strategy filter, not a second probability model. The model probability
+    already contains the underlying statistics, so support is never added to edge.
+    """
+    is_home = team == game.home_team
+    active: list[tuple[str, bool]] = []
+
+    strength_gap = own_strength - opponent_strength
+    if abs(strength_gap) >= 0.005:
+        active.append(("Bill James team strength", strength_gap > 0))
+
+    if features is not None:
+        starter_home_advantage = features[3]
+        starter_advantage = starter_home_advantage if is_home else -starter_home_advantage
+        if abs(starter_advantage) >= 0.02:
+            active.append(("starter components", starter_advantage > 0))
+
+        park_home_advantage = features[9]
+        park_advantage = park_home_advantage if is_home else -park_home_advantage
+        if abs(park_advantage) >= 0.005:
+            active.append(("park matchup", park_advantage > 0))
+
+    support_count = sum(1 for _, supports in active if supports)
+    total = len(active)
+    reasons = [
+        f"{name} {'supports' if supports else 'opposes'} {team}"
+        for name, supports in active
+    ]
+    if total == 0:
+        label = "UNKNOWN"
+    elif total >= 2 and support_count == total:
+        label = "CONFIRMED"
+    elif support_count > 0:
+        label = "MIXED"
+    else:
+        label = "CONTRARIAN"
+    return label, support_count, total, reasons
+
+
+def _value_grade(side: LiveMarketSide) -> str:
+    if side.edge >= MIN_BET_EDGE and side.expected_roi >= MIN_BET_ROI:
+        if side.sabermetric_support == "CONFIRMED":
+            return "A"
+        if side.sabermetric_support == "MIXED":
+            return "B"
+        return "C"
+    if side.expected_roi > 0:
+        return "LEAN"
+    return "PASS"
 
 def _same_matchup(market: MlbMoneylineMarket, game: MlbGameState) -> bool:
     return {market.team_a, market.team_b} == {game.away_team, game.home_team}
@@ -155,6 +242,8 @@ def _signal_for_sides(
     side_a: LiveMarketSide,
     side_b: LiveMarketSide,
 ) -> tuple[str, str | None, str]:
+    side_a.value_grade = _value_grade(side_a)
+    side_b.value_grade = _value_grade(side_b)
     best = max((side_a, side_b), key=lambda side: side.expected_roi)
     if best.edge >= MIN_BET_EDGE and best.expected_roi >= MIN_BET_ROI:
         return (
@@ -255,6 +344,25 @@ def _scoreboard_row(
 
 
 
+async def _attach_pregame_lineups(
+    client: httpx.AsyncClient,
+    schedule: list[MlbGameState],
+) -> list[MlbGameState]:
+    pregame = [game for game in schedule if game.is_pregame]
+    if not pregame:
+        return schedule
+    payloads = await asyncio.gather(
+        *(fetch_mlb_boxscore(client, game.game_pk) for game in pregame),
+        return_exceptions=True,
+    )
+    enriched = {
+        game.game_pk: attach_boxscore_payload(game, payload)
+        for game, payload in zip(pregame, payloads, strict=True)
+        if not isinstance(payload, Exception)
+    }
+    return [enriched.get(game.game_pk, game) for game in schedule]
+
+
 async def _fetch_regular_year(
     client: httpx.AsyncClient,
     year: int,
@@ -283,17 +391,21 @@ async def _live_optimized_context(
     if cached and now - cached.built_at < timedelta(minutes=MODEL_CACHE_MINUTES):
         return cached
 
-    years = [season - 3, season - 2, season - 1]
+    years = [season - 4, season - 3, season - 2, season - 1]
     historical_pairs, current_pair = await asyncio.gather(
         asyncio.gather(*(_fetch_regular_year(client, year) for year in years)),
         _fetch_regular_year(client, season, through),
     )
     historical = dict(historical_pairs)
-    artifact, prior_summary, prior_elo = prepare_optimized_model(
+    artifact, prior_summary, prior_elo = prepare_optimized_model_multifold(
+        earlier_seed_games=historical[season - 4],
+        earlier_training_games=historical[season - 3],
+        earlier_validation_games=historical[season - 2],
         seed_games=historical[season - 3],
         training_games=historical[season - 2],
         validation_games=historical[season - 1],
         min_games=min_games,
+        fold_years=(season - 2, season - 1),
     )
     _, engine = build_target_rows(
         games=current_pair[1],
@@ -306,47 +418,20 @@ async def _live_optimized_context(
     return context
 
 
-def _scheduled_rest_overrides(
-    schedule: list[MlbGameState],
-    engine: SeasonFeatureEngine,
-) -> dict[int, float]:
-    last_seen: dict[str, datetime | None] = {
-        team: state.last_game_time for team, state in engine.states.items()
-    }
-    overrides: dict[int, float] = {}
-    for game in sorted(schedule, key=lambda item: _parse_start_time(item.game_date) or datetime.max.replace(tzinfo=UTC)):
-        if not game.is_pregame:
-            continue
-        game_time = _parse_start_time(game.game_date)
-        if game_time is None:
-            continue
-
-        def rest(team: str) -> float:
-            previous = last_seen.get(team)
-            if previous is None:
-                return 3.0
-            return min(max((game_time - previous).total_seconds() / 86400.0, 0.0), 5.0)
-
-        overrides[game.game_pk] = min(max(rest(game.home_team) - rest(game.away_team), -3.0), 3.0)
-        last_seen[game.away_team] = game_time
-        last_seen[game.home_team] = game_time
-    return overrides
-
-
 async def build_live_mlb_predictions(
     bankroll: float = 100.0,
     kelly_multiplier: float = 0.25,
     season: int | None = None,
     days: int = 2,
 ) -> LiveMlbResponse:
-    """Fetch MLB scores and price upcoming games with the trained v0.6 model."""
+    """Fetch MLB scores and price upcoming games with v0.9 or its explicit v0.7 fallback."""
     now = datetime.now(UTC)
     now_eastern = now.astimezone(EASTERN)
     resolved_season = season or now_eastern.year
     start_date = now_eastern.date()
     end_date = start_date + timedelta(days=max(days, 1) - 1)
     timeout = httpx.Timeout(90.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.6.0 research-dashboard"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.9.1 research-dashboard"}
     runtime_counts: Counter[str] = Counter()
     optimized_context: LiveOptimizedContext | None = None
 
@@ -386,6 +471,7 @@ async def build_live_mlb_predictions(
                 raise schedule
             if not isinstance(model_result, Exception):
                 optimized_context = model_result
+            schedule = await _attach_pregame_lineups(client, schedule)
 
             markets, market_diagnostics = markets_result
             market_to_game: dict[str, MlbGameState] = {}
@@ -424,13 +510,9 @@ async def build_live_mlb_predictions(
     except (httpx.HTTPError, MlbDataError, PolymarketDataError) as exc:
         raise LivePredictionError(str(exc)) from exc
 
-    rest_overrides = (
-        _scheduled_rest_overrides(schedule, optimized_context.engine)
-        if optimized_context
-        else {}
-    )
     games: list[LiveGamePrediction] = []
     recommended_bets: list[RecommendedBet] = []
+    archive_rows: list[dict[str, object]] = []
     prior_values = list(prior_team_stats.values())
     prior_games_total = sum(item.games_played for item in prior_values)
     prior_league_runs = (
@@ -495,23 +577,40 @@ async def build_live_mlb_predictions(
 
         probability_a = fallback_probability_a
         model_version = "v0.5 fallback"
+        matchup_features: tuple[float, ...] | None = None
         if optimized_context:
             game_time = _parse_start_time(official_game.game_date)
             if game_time is not None:
-                features = optimized_context.engine.features_for_matchup(
+                matchup_features = optimized_context.engine.features_for_matchup(
                     away_team=official_game.away_team,
                     home_team=official_game.home_team,
                     game_time=game_time,
+                    away_pitcher_id=official_game.away_probable_pitcher_id,
+                    home_pitcher_id=official_game.home_probable_pitcher_id,
+                    away_pitcher_name=official_game.away_probable_pitcher,
+                    home_pitcher_name=official_game.home_probable_pitcher,
+                    venue=official_game.venue,
                 )
-                if official_game.game_pk in rest_overrides:
-                    features = (*features[:-1], rest_overrides[official_game.game_pk])
-                home_probability = optimized_context.artifact.full.predict(features)
+                component_ready = (
+                    optimized_context.artifact.training_component_coverage >= MIN_COMPONENT_COVERAGE
+                    and optimized_context.artifact.validation_component_coverage >= MIN_COMPONENT_COVERAGE
+                )
+                variant = (
+                    optimized_context.artifact.champion
+                    if component_ready
+                    else optimized_context.artifact.variants["v07"]
+                )
+                home_probability = variant.predict(matchup_features)
                 probability_a = (
                     home_probability
                     if market.team_a == official_game.home_team
                     else 1.0 - home_probability
                 )
-                model_version = "v0.6.0"
+                model_version = (
+                    f"v0.9.1 {variant.label} ({variant.calibration_method})"
+                    if component_ready
+                    else "v0.7 proxy · run pitching sync"
+                )
         probability_b = 1.0 - probability_a
 
         book_a = books.get(market.token_a)
@@ -522,6 +621,20 @@ async def build_live_mlb_predictions(
             runtime_counts["no_executable_ask"] += 1
             continue
 
+        support_a = _sabermetric_support_for_team(
+            team=market.team_a,
+            game=official_game,
+            own_strength=strength_a,
+            opponent_strength=strength_b,
+            features=matchup_features,
+        )
+        support_b = _sabermetric_support_for_team(
+            team=market.team_b,
+            game=official_game,
+            own_strength=strength_b,
+            opponent_strength=strength_a,
+            features=matchup_features,
+        )
         side_a = _market_side(
             market.team_a,
             probability_a,
@@ -529,6 +642,10 @@ async def build_live_mlb_predictions(
             bankroll,
             kelly_multiplier,
             book_a.ask_size if book_a else None,
+            sabermetric_support=support_a[0],
+            sabermetric_support_count=support_a[1],
+            sabermetric_support_total=support_a[2],
+            sabermetric_reasons=support_a[3],
         )
         side_b = _market_side(
             market.team_b,
@@ -537,6 +654,10 @@ async def build_live_mlb_predictions(
             bankroll,
             kelly_multiplier,
             book_b.ask_size if book_b else None,
+            sabermetric_support=support_b[0],
+            sabermetric_support_count=support_b[1],
+            sabermetric_support_total=support_b[2],
+            sabermetric_reasons=support_b[3],
         )
         signal, recommended_side, reason = _signal_for_sides(side_a, side_b)
 
@@ -552,6 +673,10 @@ async def build_live_mlb_predictions(
             away_probable_pitcher=official_game.away_probable_pitcher,
             home_probable_pitcher=official_game.home_probable_pitcher,
             venue=official_game.venue,
+            away_lineup_confirmed=len(official_game.away_lineup_ids) == 9,
+            home_lineup_confirmed=len(official_game.home_lineup_ids) == 9,
+            away_lineup_names=list(official_game.away_lineup_names),
+            home_lineup_names=list(official_game.home_lineup_names),
             team_a_strength=strength_a,
             team_b_strength=strength_b,
             side_a=side_a,
@@ -564,6 +689,59 @@ async def build_live_mlb_predictions(
             model_version=model_version,
         )
         games.append(prediction)
+        archive_rows.append(
+            {
+                "game_pk": official_game.game_pk,
+                "game_start": official_game.game_date,
+                "market_id": market.market_id,
+                "event_id": market.event_id,
+                "team_a": market.team_a,
+                "team_b": market.team_b,
+                "token_a": market.token_a,
+                "token_b": market.token_b,
+                "best_bid_a": book_a.best_bid if book_a else None,
+                "best_ask_a": ask_a,
+                "ask_size_a": book_a.ask_size if book_a else None,
+                "best_bid_b": book_b.best_bid if book_b else None,
+                "best_ask_b": ask_b,
+                "ask_size_b": book_b.ask_size if book_b else None,
+                "model_probability_a": probability_a,
+                "model_probability_b": probability_b,
+                "model_version": model_version,
+                "team_a_strength": strength_a,
+                "team_b_strength": strength_b,
+                "sabermetric_support_a": side_a.sabermetric_support,
+                "sabermetric_support_count_a": side_a.sabermetric_support_count,
+                "sabermetric_support_total_a": side_a.sabermetric_support_total,
+                "sabermetric_reasons_a": side_a.sabermetric_reasons,
+                "value_grade_a": side_a.value_grade,
+                "sabermetric_support_b": side_b.sabermetric_support,
+                "sabermetric_support_count_b": side_b.sabermetric_support_count,
+                "sabermetric_support_total_b": side_b.sabermetric_support_total,
+                "sabermetric_reasons_b": side_b.sabermetric_reasons,
+                "value_grade_b": side_b.value_grade,
+                "model_features": (
+                    dict(zip((
+                        "Base", "ProxyStarter", "ProxyBullpen", "StarterComponent",
+                        "ExpectedInnings", "BullpenComponent", "BullpenFatigue",
+                        "StarterComponentLoose", "StarterWorkload", "ParkInteraction",
+                        "ParkNeutralBase", "StarterKRate", "StarterBBRate", "StarterHRRate",
+                    ), matchup_features, strict=True))
+                    if matchup_features is not None else None
+                ),
+                "prediction_horizon_minutes": max(
+                    0, int(((_parse_start_time(official_game.game_date) or now) - now).total_seconds() / 60)
+                ),
+                "away_probable_pitcher_id": official_game.away_probable_pitcher_id,
+                "home_probable_pitcher_id": official_game.home_probable_pitcher_id,
+                "away_lineup_confirmed": len(official_game.away_lineup_ids) == 9,
+                "home_lineup_confirmed": len(official_game.home_lineup_ids) == 9,
+                "away_lineup_ids": list(official_game.away_lineup_ids),
+                "home_lineup_ids": list(official_game.home_lineup_ids),
+                "signal": signal,
+                "recommended_side": recommended_side,
+            }
+        )
 
         if signal == "BET" and recommended_side:
             selected = side_a if side_a.team == recommended_side else side_b
@@ -586,22 +764,41 @@ async def build_live_mlb_predictions(
                     stake=selected.kelly_stake,
                     shares=selected.shares,
                     kelly_capped_by_depth=selected.kelly_capped_by_depth,
+                    kelly_capped_by_risk=selected.kelly_capped_by_risk,
+                    sabermetric_support=selected.sabermetric_support,
+                    sabermetric_support_count=selected.sabermetric_support_count,
+                    sabermetric_support_total=selected.sabermetric_support_total,
+                    value_grade=selected.value_grade if selected.value_grade in {"A", "B", "C"} else "C",
                     polymarket_url=prediction.polymarket_url,
                 )
             )
 
     games.sort(key=lambda game: _parse_start_time(game.start_time) or datetime.max.replace(tzinfo=UTC))
-    recommended_bets.sort(key=lambda bet: (bet.expected_value, bet.expected_roi), reverse=True)
+    grade_rank = {"A": 3, "B": 2, "C": 1}
+    recommended_bets.sort(
+        key=lambda bet: (grade_rank.get(bet.value_grade, 0), bet.expected_value, bet.expected_roi),
+        reverse=True,
+    )
     scoreboard = [
         _scoreboard_row(game, game_to_market.get(game.game_pk))
         for game in sorted(schedule, key=lambda item: item.game_date)
     ]
     diagnostic_summary = _diagnostic_summary(market_diagnostics, runtime_counts)
+    append_market_snapshots(archive_rows)
 
     return LiveMlbResponse(
         generated_at=datetime.now(UTC),
         season=resolved_season,
-        model_version="v0.6.0" if optimized_context else "v0.5 fallback",
+        model_version=(
+            (
+                f"v0.9.1 {optimized_context.artifact.champion.label} "
+                f"({optimized_context.artifact.champion.calibration_method})"
+                if optimized_context.artifact.validation_component_coverage >= MIN_COMPONENT_COVERAGE
+                else "v0.7 proxy · run pitching sync"
+            )
+            if optimized_context
+            else "v0.5 fallback"
+        ),
         model_training_rows=(optimized_context.artifact.training_rows if optimized_context else 0),
         model_validation_rows=(optimized_context.artifact.validation_rows if optimized_context else 0),
         bankroll=bankroll,
@@ -619,7 +816,7 @@ async def build_live_mlb_predictions(
 async def build_single_scoreboard_game(game_pk: int) -> ScoreboardGame:
     """Fetch one game for resolving a locally stored paper bet."""
     timeout = httpx.Timeout(15.0, connect=8.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.6.0 paper-settlement"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.9.1 paper-settlement"}
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             game = await fetch_mlb_game(client, game_pk)

@@ -9,6 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import httpx
+import numpy as np
 
 from .mlb import MlbDataError, MlbGameState, fetch_mlb_regular_season_schedule
 from .model import (
@@ -21,11 +22,16 @@ from .model import (
     regressed_pythagorean_expectation,
 )
 from .optimized import (
+    FEATURE_NAMES,
+    ModelVariant,
     build_target_rows,
     prepare_optimized_model,
+    prepare_optimized_model_multifold,
 )
 from .schemas import (
     BacktestCalibrationBucket,
+    BacktestCalibrationComparison,
+    BacktestFeatureDiagnostic,
     BacktestGame,
     BacktestLeakageAudit,
     BacktestModelMetrics,
@@ -334,6 +340,27 @@ def _calibration_buckets(
                 ),
             )
         )
+    combined: list[tuple[float, bool]] = []
+    for prediction in predictions:
+        probability, correct, _ = _row_probability_and_correct(prediction, mode)
+        if probability is not None and correct is not None and 0.60 <= probability < 0.80:
+            combined.append((probability, correct))
+    buckets.append(
+        BacktestCalibrationBucket(
+            label="60%-80% combined",
+            predictions=len(combined),
+            mean_probability=(
+                sum(probability for probability, _ in combined) / len(combined)
+                if combined
+                else None
+            ),
+            actual_rate=(
+                sum(1 for _, correct in combined if correct) / len(combined)
+                if combined
+                else None
+            ),
+        )
+    )
     return buckets
 
 
@@ -442,6 +469,79 @@ def _variant_metrics(
     )
 
 
+def _feature_diagnostics(
+    rows: list,
+    variant: ModelVariant | None,
+) -> list[BacktestFeatureDiagnostic]:
+    if not rows:
+        return []
+    coefficients = variant.model.coefficient_map() if variant else {}
+    diagnostics: list[BacktestFeatureDiagnostic] = []
+    for index, name in enumerate(FEATURE_NAMES):
+        values = np.asarray([row.features[index] for row in rows], dtype=float)
+        if not len(values):
+            continue
+        std = float(values.std())
+        diagnostics.append(
+            BacktestFeatureDiagnostic(
+                name=name,
+                mean=float(values.mean()),
+                std=std,
+                minimum=float(values.min()),
+                p05=float(np.quantile(values, 0.05)),
+                median=float(np.median(values)),
+                p95=float(np.quantile(values, 0.95)),
+                maximum=float(values.max()),
+                unique_values=int(len(np.unique(np.round(values, 8)))),
+                near_constant=std < 1e-3 or len(np.unique(np.round(values, 8))) < 10,
+                coefficient=coefficients.get(name),
+            )
+        )
+    return diagnostics
+
+
+def _calibration_comparison(
+    rows: list,
+    variant: ModelVariant | None,
+) -> list[BacktestCalibrationComparison]:
+    if not rows or variant is None:
+        return []
+    raw = [variant.model.predict(row.features) for row in rows]
+    comparisons: list[BacktestCalibrationComparison] = []
+    for method, calibrator in sorted(variant.calibration_candidates.items()):
+        probabilities = [calibrator.transform(value) for value in raw]
+        count = len(rows)
+        if not count:
+            continue
+        correct = 0
+        brier = 0.0
+        log_loss_value = 0.0
+        for probability, row in zip(probabilities, rows, strict=True):
+            predicted_home = probability >= 0.5
+            actual_home = row.home_win >= 0.5
+            correct += int(predicted_home == actual_home)
+            brier += (probability - row.home_win) ** 2
+            clipped = clip_probability(probability)
+            log_loss_value += -(
+                row.home_win * math.log(clipped)
+                + (1.0 - row.home_win) * math.log(1.0 - clipped)
+            )
+        comparisons.append(
+            BacktestCalibrationComparison(
+                method=method,
+                selected=(
+                    calibrator.method == variant.calibrator.method
+                    and abs(calibrator.shrinkage - variant.calibrator.shrinkage) < 1e-9
+                ),
+                validation_brier=variant.calibration_scores.get(method),
+                target_accuracy=correct / count,
+                target_brier=brier / count,
+                target_log_loss=log_loss_value / count,
+            )
+        )
+    return comparisons
+
+
 def evaluate_walk_forward_games(
     games: list[MlbGameState],
     *,
@@ -452,33 +552,78 @@ def evaluate_walk_forward_games(
     prior_games: list[MlbGameState] | None = None,
     training_games_by_season: dict[int, list[MlbGameState]] | None = None,
 ) -> BacktestResponse:
-    """Compare v0.4, v0.5, and v0.6 using only pregame information."""
+    """Compare v0.4, v0.5, v0.7, and v0.9 using only pregame information."""
     optimized_probability: dict[int, float] = {}
     variant_probability_maps: dict[str, dict[int, float]] = {}
     optimized_artifact = None
+    selected_optimized_variant = None
+    optimized_label = "Component-aware v0.9"
     target_feature_rows = []
     training_seasons: list[int] = []
+    calibration_seasons: list[int] = []
 
-    required = (season - 3, season - 2, season - 1)
+    required = (season - 4, season - 3, season - 2, season - 1)
+    fallback_required = (season - 3, season - 2, season - 1)
     if training_games_by_season and all(year in training_games_by_season for year in required):
+        optimized_artifact, target_prior, target_elo = prepare_optimized_model_multifold(
+            earlier_seed_games=training_games_by_season[season - 4],
+            earlier_training_games=training_games_by_season[season - 3],
+            earlier_validation_games=training_games_by_season[season - 2],
+            seed_games=training_games_by_season[season - 3],
+            training_games=training_games_by_season[season - 2],
+            validation_games=training_games_by_season[season - 1],
+            min_games=min_games,
+            fold_years=(season - 2, season - 1),
+        )
+    elif training_games_by_season and all(
+        year in training_games_by_season for year in fallback_required
+    ):
         optimized_artifact, target_prior, target_elo = prepare_optimized_model(
             seed_games=training_games_by_season[season - 3],
             training_games=training_games_by_season[season - 2],
             validation_games=training_games_by_season[season - 1],
             min_games=min_games,
         )
+
+    if optimized_artifact is not None:
         target_feature_rows, _ = build_target_rows(
             games=games,
             prior_summary=target_prior,
             prior_elo=target_elo,
             min_games=min_games,
         )
-        training_seasons = [season - 2, season - 1]
+        training_seasons = [season - 2]
+        calibration_seasons = list(optimized_artifact.selection_folds) or [season - 1]
         for name, variant in optimized_artifact.variants.items():
             variant_probability_maps[name] = {
                 row.game.game_pk: variant.predict(row.features) for row in target_feature_rows
             }
-        optimized_probability = variant_probability_maps.get("Full", {})
+        target_component_coverage = (
+            sum(1 for row in target_feature_rows if row.component_starter_covered)
+            / len(target_feature_rows)
+            if target_feature_rows
+            else 0.0
+        )
+        component_ready = (
+            optimized_artifact.training_component_coverage >= 0.70
+            and optimized_artifact.validation_component_coverage >= 0.70
+            and target_component_coverage >= 0.70
+        )
+        selected_optimized_variant = (
+            optimized_artifact.champion
+            if component_ready
+            else optimized_artifact.variants["v07"]
+        )
+        selected_variant_name = next(
+            (name for name, item in optimized_artifact.variants.items() if item is selected_optimized_variant),
+            "v07",
+        )
+        optimized_probability = variant_probability_maps.get(selected_variant_name, {})
+        optimized_label = (
+            f"v0.9.1 {selected_optimized_variant.label}"
+            if component_ready
+            else "v0.7 proxy (pitching sync required)"
+        )
 
     priors = _season_priors(prior_games or [])
     calibration_rows = _training_rows_from_prior_season(
@@ -592,19 +737,32 @@ def evaluate_walk_forward_games(
     optimized_metrics = _metrics(
         predictions,
         key="optimized",
-        label="Optimized v0.6",
+        label=optimized_label,
         mode="optimized",
     )
 
     ablations: list[BacktestModelMetrics] = []
     if optimized_artifact:
         labels = {
-            "Base": "Base only",
-            "Elo": "+ Elo",
-            "Form": "+ Form",
-            "Full": "Full v0.6",
+            "v07": "v0.7 proxy benchmark",
+            "ComponentStarter": "+ aggregate starter components",
+            "StarterWorkload": "+ starter quality × expected innings",
+            "Park": "+ prior-season park interaction",
+            "StarterSplit": "+ separate K/BB/HR starter rates",
+            "ParkNeutralSplit": "+ park-neutral team strength",
+            "BullpenQuality": "+ bullpen quality (experimental)",
+            "Full": "+ fatigue (experimental)",
         }
-        for name in ("Base", "Elo", "Form", "Full"):
+        for name in (
+            "v07",
+            "ComponentStarter",
+            "StarterWorkload",
+            "Park",
+            "StarterSplit",
+            "ParkNeutralSplit",
+            "BullpenQuality",
+            "Full",
+        ):
             ablations.append(
                 _variant_metrics(
                     predictions,
@@ -656,11 +814,61 @@ def evaluate_walk_forward_games(
         calibration_training_games=len(calibration_rows),
         optimized_training_games=optimized_artifact.training_rows if optimized_artifact else 0,
         optimized_validation_games=optimized_artifact.validation_rows if optimized_artifact else 0,
-        optimized_shrinkage=optimized_artifact.full.shrinkage if optimized_artifact else 0.0,
+        optimized_training_starter_coverage=(
+            optimized_artifact.training_starter_coverage if optimized_artifact else 0.0
+        ),
+        optimized_validation_starter_coverage=(
+            optimized_artifact.validation_starter_coverage if optimized_artifact else 0.0
+        ),
+        target_starter_coverage=(
+            sum(1 for row in target_feature_rows if row.starter_covered) / len(target_feature_rows)
+            if target_feature_rows
+            else 0.0
+        ),
+        optimized_training_component_coverage=(
+            optimized_artifact.training_component_coverage if optimized_artifact else 0.0
+        ),
+        optimized_validation_component_coverage=(
+            optimized_artifact.validation_component_coverage if optimized_artifact else 0.0
+        ),
+        target_component_coverage=(
+            sum(1 for row in target_feature_rows if row.component_starter_covered) / len(target_feature_rows)
+            if target_feature_rows
+            else 0.0
+        ),
+        optimized_training_bullpen_coverage=(
+            optimized_artifact.training_bullpen_coverage if optimized_artifact else 0.0
+        ),
+        optimized_validation_bullpen_coverage=(
+            optimized_artifact.validation_bullpen_coverage if optimized_artifact else 0.0
+        ),
+        target_bullpen_coverage=(
+            sum(1 for row in target_feature_rows if row.bullpen_covered) / len(target_feature_rows)
+            if target_feature_rows
+            else 0.0
+        ),
+        optimized_shrinkage=(
+            selected_optimized_variant.shrinkage if selected_optimized_variant else 0.0
+        ),
+        optimized_calibration_method=(
+            selected_optimized_variant.calibration_method
+            if selected_optimized_variant
+            else "identity"
+        ),
         optimized_coefficients=(
-            optimized_artifact.full.model.coefficient_map() if optimized_artifact else {}
+            selected_optimized_variant.model.coefficient_map()
+            if selected_optimized_variant
+            else {}
+        ),
+        optimized_variant=(selected_optimized_variant.label if selected_optimized_variant else ""),
+        feature_diagnostics=_feature_diagnostics(
+            target_feature_rows, selected_optimized_variant
+        ),
+        calibration_comparison=_calibration_comparison(
+            target_feature_rows, selected_optimized_variant
         ),
         training_seasons=training_seasons,
+        calibration_seasons=calibration_seasons,
         leakage_audit=BacktestLeakageAudit(),
     )
 
@@ -689,9 +897,9 @@ async def build_mlb_backtest(
             prior_games=[],
         )
 
-    years = [season - 3, season - 2, season - 1]
+    years = [season - 4, season - 3, season - 2, season - 1]
     timeout = httpx.Timeout(90.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.6.0 backtest"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.9.1 backtest"}
 
     async def fetch_year(client: httpx.AsyncClient, year: int) -> tuple[int, list[MlbGameState]]:
         return (

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
+
+import json
+import os
+from pathlib import Path
 
 import httpx
 
@@ -14,6 +18,43 @@ MLB_STATS_BASE_URL = "https://statsapi.mlb.com/api/v1"
 
 class MlbDataError(RuntimeError):
     """Raised when the MLB Stats API does not return usable data."""
+
+
+@dataclass(frozen=True)
+class MlbPitchingLine:
+    """One pitcher's game line, parsed from the official MLB box score."""
+
+    pitcher_id: int
+    name: str | None
+    team: str
+    is_starter: bool
+    outs_recorded: int
+    batters_faced: int
+    strikeouts: int
+    walks: int
+    hit_batters: int
+    home_runs: int
+    pitches_thrown: int
+    earned_runs: int
+
+    @property
+    def innings_pitched(self) -> float:
+        return self.outs_recorded / 3.0
+
+
+def _innings_to_outs(value: object) -> int:
+    text = str(value or "0").strip()
+    if not text:
+        return 0
+    try:
+        whole_text, _, fraction_text = text.partition(".")
+        whole = int(whole_text or 0)
+        fraction = int(fraction_text[:1] or 0)
+        if fraction not in {0, 1, 2}:
+            return max(int(round(float(text) * 3)), 0)
+        return max(whole * 3 + fraction, 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 @dataclass(frozen=True)
@@ -44,6 +85,24 @@ class MlbGameState:
     home_probable_pitcher: str | None
     venue: str | None
     game_type: str | None = None
+    away_probable_pitcher_id: int | None = None
+    home_probable_pitcher_id: int | None = None
+    away_first5_runs: int | None = None
+    home_first5_runs: int | None = None
+    away_pitching: tuple[MlbPitchingLine, ...] = ()
+    home_pitching: tuple[MlbPitchingLine, ...] = ()
+    away_lineup_ids: tuple[int, ...] = ()
+    home_lineup_ids: tuple[int, ...] = ()
+    away_lineup_names: tuple[str, ...] = ()
+    home_lineup_names: tuple[str, ...] = ()
+
+    @property
+    def away_starter_line(self) -> MlbPitchingLine | None:
+        return next((line for line in self.away_pitching if line.is_starter), None)
+
+    @property
+    def home_starter_line(self) -> MlbPitchingLine | None:
+        return next((line for line in self.home_pitching if line.is_starter), None)
 
     @property
     def is_live(self) -> bool:
@@ -78,6 +137,26 @@ def _safe_int(value: object) -> int | None:
 def _optional_text(value: object) -> str | None:
     text = str(value or "").strip()
     return text or None
+
+
+def _first_five_runs(linescore: object, side: str) -> int | None:
+    if not isinstance(linescore, dict):
+        return None
+    innings = linescore.get("innings")
+    if not isinstance(innings, list) or len(innings) < 5:
+        return None
+    total = 0
+    for inning in innings[:5]:
+        if not isinstance(inning, dict):
+            return None
+        side_payload = inning.get(side)
+        if not isinstance(side_payload, dict):
+            return None
+        runs = _safe_int(side_payload.get("runs"))
+        if runs is None:
+            runs = 0
+        total += runs
+    return total
 
 
 def _parse_schedule_payload(payload: object) -> list[MlbGameState]:
@@ -132,9 +211,141 @@ def _parse_schedule_payload(payload: object) -> list[MlbGameState]:
                     home_probable_pitcher=_optional_text(home_pitcher.get("fullName")),
                     venue=_optional_text(venue.get("name")),
                     game_type=_optional_text(raw_game.get("gameType")),
+                    away_probable_pitcher_id=_safe_int(away_pitcher.get("id")),
+                    home_probable_pitcher_id=_safe_int(home_pitcher.get("id")),
+                    away_first5_runs=_first_five_runs(linescore, "away"),
+                    home_first5_runs=_first_five_runs(linescore, "home"),
                 )
             )
     return games
+
+
+def _parse_boxscore_side(payload: object, *, team: str) -> tuple[MlbPitchingLine, ...]:
+    if not isinstance(payload, dict):
+        return ()
+    pitcher_ids = payload.get("pitchers")
+    players = payload.get("players")
+    if not isinstance(pitcher_ids, list) or not isinstance(players, dict):
+        return ()
+
+    lines: list[MlbPitchingLine] = []
+    for position, raw_id in enumerate(pitcher_ids):
+        pitcher_id = _safe_int(raw_id)
+        if pitcher_id is None:
+            continue
+        player = players.get(f"ID{pitcher_id}") or players.get(str(pitcher_id)) or {}
+        if not isinstance(player, dict):
+            continue
+        person = player.get("person") or {}
+        stats = player.get("stats") or {}
+        pitching = stats.get("pitching") or {}
+        if not isinstance(pitching, dict):
+            continue
+        lines.append(
+            MlbPitchingLine(
+                pitcher_id=pitcher_id,
+                name=_optional_text(person.get("fullName")),
+                team=team,
+                is_starter=position == 0,
+                outs_recorded=_innings_to_outs(pitching.get("inningsPitched")),
+                batters_faced=_safe_int(pitching.get("battersFaced")) or 0,
+                strikeouts=_safe_int(pitching.get("strikeOuts")) or 0,
+                walks=_safe_int(pitching.get("baseOnBalls")) or 0,
+                hit_batters=_safe_int(pitching.get("hitBatsmen")) or 0,
+                home_runs=_safe_int(pitching.get("homeRuns")) or 0,
+                pitches_thrown=_safe_int(pitching.get("pitchesThrown")) or 0,
+                earned_runs=_safe_int(pitching.get("earnedRuns")) or 0,
+            )
+        )
+    return tuple(lines)
+
+
+def _parse_lineup_side(payload: object) -> tuple[tuple[int, ...], tuple[str, ...]]:
+    if not isinstance(payload, dict):
+        return (), ()
+    batter_ids = payload.get("batters")
+    players = payload.get("players")
+    if not isinstance(batter_ids, list) or not isinstance(players, dict):
+        return (), ()
+    ordered: list[tuple[int, int, str]] = []
+    for position, raw_id in enumerate(batter_ids):
+        player_id = _safe_int(raw_id)
+        if player_id is None:
+            continue
+        player = players.get(f"ID{player_id}") or players.get(str(player_id)) or {}
+        if not isinstance(player, dict):
+            continue
+        person = player.get("person") or {}
+        batting_order = _safe_int(player.get("battingOrder"))
+        if batting_order is None or batting_order <= 0:
+            continue
+        ordered.append((batting_order, player_id, _optional_text(person.get("fullName")) or str(player_id)))
+    ordered.sort(key=lambda item: (item[0], item[1]))
+    # A confirmed MLB batting order should contain nine hitters.
+    if len(ordered) < 9:
+        return (), ()
+    return (
+        tuple(item[1] for item in ordered[:9]),
+        tuple(item[2] for item in ordered[:9]),
+    )
+
+
+def attach_boxscore_payload(game: MlbGameState, payload: object) -> MlbGameState:
+    """Return a game enriched with official per-pitcher box-score lines."""
+    if not isinstance(payload, dict):
+        return game
+    teams = payload.get("teams") or {}
+    if not isinstance(teams, dict):
+        return game
+    away_ids, away_names = _parse_lineup_side(teams.get("away"))
+    home_ids, home_names = _parse_lineup_side(teams.get("home"))
+    return replace(
+        game,
+        away_pitching=_parse_boxscore_side(teams.get("away"), team=game.away_team),
+        home_pitching=_parse_boxscore_side(teams.get("home"), team=game.home_team),
+        away_lineup_ids=away_ids,
+        home_lineup_ids=home_ids,
+        away_lineup_names=away_names,
+        home_lineup_names=home_names,
+    )
+
+
+def pitching_cache_dir() -> Path:
+    return Path(os.environ.get("MONEYBALL_PITCHING_CACHE", "data/mlb_boxscores"))
+
+
+def cached_boxscore_path(game_pk: int, *, cache_dir: Path | None = None) -> Path:
+    root = cache_dir or pitching_cache_dir()
+    return root / f"{game_pk}.json"
+
+
+def enrich_games_from_boxscore_cache(
+    games: list[MlbGameState],
+    *,
+    cache_dir: Path | None = None,
+) -> list[MlbGameState]:
+    enriched: list[MlbGameState] = []
+    for game in games:
+        path = cached_boxscore_path(game.game_pk, cache_dir=cache_dir)
+        if not path.exists():
+            enriched.append(game)
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            enriched.append(game)
+            continue
+        enriched.append(attach_boxscore_payload(game, payload))
+    return enriched
+
+
+async def fetch_mlb_boxscore(
+    client: httpx.AsyncClient,
+    game_pk: int,
+) -> object:
+    response = await client.get(f"{MLB_STATS_BASE_URL}/game/{game_pk}/boxscore")
+    response.raise_for_status()
+    return response.json()
 
 
 async def fetch_team_season_stats(
@@ -238,9 +449,10 @@ async def fetch_mlb_regular_season_schedule(
             "startDate": start_date.isoformat(),
             "endDate": end_date.isoformat(),
             "gameTypes": "R",
-            "hydrate": "team",
+            "hydrate": "team,probablePitcher,linescore",
         },
     )
     response.raise_for_status()
     games = _parse_schedule_payload(response.json())
-    return [game for game in games if game.game_type in {None, "R"}]
+    regular = [game for game in games if game.game_type in {None, "R"}]
+    return enrich_games_from_boxscore_cache(regular)

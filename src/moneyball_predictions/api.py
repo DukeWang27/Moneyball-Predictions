@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .backtest import BacktestError, build_mlb_backtest
+from .edge_performance import EdgePerformanceError, build_edge_performance
 from .live import (
     LivePredictionError,
     build_live_mlb_predictions,
@@ -19,6 +20,7 @@ from .model import log5_probability, pythagorean_expectation
 from .odds import devig_two_way_decimal, expected_value
 from .schemas import (
     BacktestResponse,
+    EdgePerformanceResponse,
     LiveMlbResponse,
     PredictionRequest,
     PredictionResponse,
@@ -31,8 +33,8 @@ STATIC_DIR = PACKAGE_DIR / "static"
 
 app = FastAPI(
     title="Moneyball Predictions API",
-    version="0.6.0",
-    description="MLB predictions, paper trading, scores, and leakage-safe optimized model comparison.",
+    version="0.9.1",
+    description="MLB predictions, paper trading, archived edge performance, scores, and leakage-safe model comparison.",
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
@@ -74,6 +76,18 @@ async def mlb_backtest(
         )
     except BacktestError as exc:
         raise HTTPException(status_code=502, detail=f"Historical backtest failed: {exc}") from exc
+
+
+@app.get("/api/v1/edge-performance/mlb", response_model=EdgePerformanceResponse)
+async def mlb_edge_performance(
+    entry_horizon_minutes: int = Query(default=60, ge=15, le=1440),
+) -> EdgePerformanceResponse:
+    try:
+        return await build_edge_performance(
+            entry_horizon_minutes=entry_horizon_minutes,
+        )
+    except EdgePerformanceError as exc:
+        raise HTTPException(status_code=502, detail=f"Edge performance refresh failed: {exc}") from exc
 
 
 @app.get("/api/v1/mlb/game/{game_pk}", response_model=ScoreboardGame)

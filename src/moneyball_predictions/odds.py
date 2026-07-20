@@ -82,6 +82,7 @@ def prediction_market_kelly_stake(
     bankroll: float,
     multiplier: float = 0.25,
     top_ask_size: float | None = None,
+    max_bankroll_fraction: float = 1.0,
 ) -> tuple[float, float, float, bool]:
     """Return a liquidity-aware fractional-Kelly stake.
 
@@ -96,9 +97,11 @@ def prediction_market_kelly_stake(
         raise ValueError("multiplier must be greater than 0 and at most 1")
     if top_ask_size is not None and top_ask_size < 0:
         raise ValueError("top_ask_size cannot be negative")
+    if not 0.0 < max_bankroll_fraction <= 1.0:
+        raise ValueError("max_bankroll_fraction must be greater than 0 and at most 1")
 
     full_fraction = prediction_market_kelly_fraction(model_probability, buy_price)
-    applied_fraction = full_fraction * multiplier
+    applied_fraction = min(full_fraction * multiplier, max_bankroll_fraction)
     raw_stake = bankroll * applied_fraction
     capped_by_depth = False
 

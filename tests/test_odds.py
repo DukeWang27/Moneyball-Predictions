@@ -58,3 +58,16 @@ def test_kelly_stake_is_capped_by_best_ask_depth() -> None:
     )
     assert stake == pytest.approx(5.0)
     assert capped is True
+
+
+def test_kelly_can_be_capped_at_one_percent_of_bankroll() -> None:
+    stake, full, applied, _ = prediction_market_kelly_stake(
+        model_probability=0.80,
+        buy_price=0.50,
+        bankroll=100.0,
+        multiplier=0.25,
+        max_bankroll_fraction=0.01,
+    )
+    assert full == pytest.approx(0.60)
+    assert applied == pytest.approx(0.01)
+    assert stake == pytest.approx(1.0)
