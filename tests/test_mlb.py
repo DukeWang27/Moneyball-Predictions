@@ -242,3 +242,47 @@ def test_boxscore_parser_captures_confirmed_lineups() -> None:
     assert len(enriched.away_lineup_ids) == 9
     assert len(enriched.home_lineup_names) == 9
     assert enriched.away_lineup_names[0] == "Away 1"
+
+
+def test_boxscore_parser_captures_team_batting_components() -> None:
+    from moneyball_predictions.mlb import MlbGameState, attach_boxscore_payload
+
+    game = MlbGameState(
+        game_pk=999,
+        game_date="2026-07-20T23:00:00Z",
+        official_date="2026-07-20",
+        away_team="Boston Red Sox",
+        home_team="New York Yankees",
+        away_score=5,
+        home_score=4,
+        abstract_state="Final",
+        detailed_state="Final",
+        coded_state="F",
+        current_inning=9,
+        inning_state="Bottom",
+        inning_ordinal="9th",
+        away_probable_pitcher=None,
+        home_probable_pitcher=None,
+        venue="Yankee Stadium",
+    )
+    batting = {
+        "atBats": 35,
+        "hits": 10,
+        "doubles": 2,
+        "triples": 1,
+        "homeRuns": 2,
+        "baseOnBalls": 4,
+        "intentionalWalks": 1,
+        "hitByPitch": 1,
+    }
+    payload = {
+        "teams": {
+            "away": {"pitchers": [], "players": {}, "teamStats": {"batting": batting}},
+            "home": {"pitchers": [], "players": {}, "teamStats": {"batting": batting}},
+        }
+    }
+    enriched = attach_boxscore_payload(game, payload)
+    assert enriched.away_batting is not None
+    assert enriched.away_batting.home_runs == 2
+    assert enriched.home_batting is not None
+    assert enriched.home_batting.intentional_walks == 1

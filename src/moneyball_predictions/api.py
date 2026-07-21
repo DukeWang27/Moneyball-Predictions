@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -18,12 +19,20 @@ from .live import (
 )
 from .model import log5_probability, pythagorean_expectation
 from .odds import devig_two_way_decimal, expected_value
+from .player_props import (
+    PlayerPropError,
+    build_strikeout_prop_board,
+    build_strikeout_prop_settlement,
+)
+from .research_api import router as research_router
 from .schemas import (
     BacktestResponse,
     EdgePerformanceResponse,
     LiveMlbResponse,
     PredictionRequest,
     PredictionResponse,
+    PropBoardResponse,
+    PropSettlementResponse,
     ScoreboardGame,
     SideAnalysis,
 )
@@ -33,10 +42,11 @@ STATIC_DIR = PACKAGE_DIR / "static"
 
 app = FastAPI(
     title="Moneyball Predictions API",
-    version="0.9.1",
-    description="MLB predictions, paper trading, archived edge performance, scores, and leakage-safe model comparison.",
+    version="0.12.1",
+    description="MLB moneylines, pitcher props, paper trading, execution research, and leakage-safe model comparison.",
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.include_router(research_router)
 
 
 @app.get("/health")
@@ -76,6 +86,46 @@ async def mlb_backtest(
         )
     except BacktestError as exc:
         raise HTTPException(status_code=502, detail=f"Historical backtest failed: {exc}") from exc
+
+
+@app.get("/api/v1/props/strikeouts", response_model=PropBoardResponse)
+async def mlb_strikeout_props(
+    stake_dollars: float = Query(default=50.0, gt=0, le=100_000),
+    season: int | None = Query(default=None, ge=2000, le=2100),
+    days: int = Query(default=3, ge=1, le=7),
+) -> PropBoardResponse:
+    try:
+        return await build_strikeout_prop_board(
+            stake_dollars=stake_dollars,
+            season=season,
+            days=days,
+        )
+    except PlayerPropError as exc:
+        raise HTTPException(status_code=502, detail=f"Player-prop refresh failed: {exc}") from exc
+
+
+@app.get(
+    "/api/v1/props/strikeouts/settlement",
+    response_model=PropSettlementResponse,
+)
+async def mlb_strikeout_prop_settlement(
+    game_pk: int = Query(gt=0),
+    player_id: int = Query(gt=0),
+    threshold: int = Query(ge=1, le=30),
+    side: Literal["YES", "NO"] = Query(),
+) -> PropSettlementResponse:
+    try:
+        return await build_strikeout_prop_settlement(
+            game_pk=game_pk,
+            player_id=player_id,
+            threshold=threshold,
+            side=side,
+        )
+    except PlayerPropError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Player-prop settlement failed: {exc}",
+        ) from exc
 
 
 @app.get("/api/v1/edge-performance/mlb", response_model=EdgePerformanceResponse)

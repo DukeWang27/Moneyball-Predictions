@@ -328,7 +328,7 @@ async def build_edge_performance(
     start_date = min(dates)
     end_date = max(max(dates), date.today())
     timeout = httpx.Timeout(90.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.9.1 edge-performance"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.12.0 edge-performance"}
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             schedule = await fetch_mlb_schedule(client, start_date, end_date)

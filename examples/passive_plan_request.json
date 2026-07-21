@@ -1,0 +1,10 @@
+{
+  "token_id": "REPLACE_WITH_TOKEN_ID",
+  "fair_probability": 0.62,
+  "desired_dollars": 10,
+  "best_bid": 0.53,
+  "best_ask": 0.56,
+  "tick_size": 0.01,
+  "required_edge": 0.05,
+  "adverse_selection_buffer": 0.01
+}

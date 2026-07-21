@@ -79,6 +79,8 @@ class LiveGamePrediction(BaseModel):
     polymarket_url: str
     away_team: str
     home_team: str
+    away_team_id: int | None = None
+    home_team_id: int | None = None
     away_probable_pitcher: str | None = None
     home_probable_pitcher: str | None = None
     venue: str | None = None
@@ -95,9 +97,9 @@ class LiveGamePrediction(BaseModel):
     recommendation_reason: str
     liquidity: float | None = None
     volume: float | None = None
-    model_version: str = "v0.9.1"
+    model_version: str = "v0.12.1"
     methodology: str = (
-        "v0.9.1 model lab using regressed team strength, alternative starter shrinkage, starter-workload interaction, prior-season park interaction, and validation-only calibration selection"
+        "v0.12.1 institutional prop lab using leakage-safe baseball features, regularized logistic regression, boosted trees, expected-runs probabilities, and a validation-selected ensemble"
     )
 
 
@@ -132,6 +134,8 @@ class ScoreboardGame(BaseModel):
     official_date: str | None
     away_team: str
     home_team: str
+    away_team_id: int | None = None
+    home_team_id: int | None = None
     away_score: int | None
     home_score: int | None
     abstract_state: str
@@ -163,7 +167,7 @@ class MatchingDiagnostics(BaseModel):
 class LiveMlbResponse(BaseModel):
     generated_at: datetime
     season: int
-    model_version: str = "v0.9.1"
+    model_version: str = "v0.12.1"
     model_training_rows: int = 0
     model_validation_rows: int = 0
     bankroll: float
@@ -218,6 +222,26 @@ class BacktestCalibrationComparison(BaseModel):
     target_brier: float | None = None
     target_log_loss: float | None = None
 
+
+
+class BacktestTournamentModel(BaseModel):
+    key: str
+    label: str
+    family: str
+    selected: bool = False
+    promoted: bool = False
+    validation_brier_mean: float | None = None
+    validation_log_loss_mean: float | None = None
+    fold_briers: list[float] = Field(default_factory=list)
+    fold_log_losses: list[float] = Field(default_factory=list)
+    target_accuracy: float | None = None
+    target_brier: float | None = None
+    target_log_loss: float | None = None
+    prediction_count: int = 0
+    calibration_method: str = "identity"
+    blend_weights: list[float] = Field(default_factory=list)
+
+
 class BacktestLeakageAudit(BaseModel):
     chronological_order: bool = True
     prediction_before_result_update: bool = True
@@ -229,8 +253,8 @@ class BacktestLeakageAudit(BaseModel):
     passed: bool = True
     note: str = (
         "Each prediction is created before the current final score is added. Priors use the "
-        "previous season, component starter and reliever features use prior games only, and v0.9 "
-        "coefficients are trained before the target season."
+        "previous season, component starter and reliever features use prior games only, and v0.12 "
+        "challengers are trained and selected before the target season."
     )
 
 
@@ -305,11 +329,15 @@ class BacktestResponse(BaseModel):
     calibration_comparison: list[BacktestCalibrationComparison] = Field(default_factory=list)
     training_seasons: list[int] = Field(default_factory=list)
     calibration_seasons: list[int] = Field(default_factory=list)
+    tournament_models: list[BacktestTournamentModel] = Field(default_factory=list)
+    tournament_champion: str = ""
+    tournament_decision: str = ""
+    tournament_promoted: bool = False
+    tournament_selection_folds: list[int] = Field(default_factory=list)
     leakage_audit: BacktestLeakageAudit = Field(default_factory=BacktestLeakageAudit)
     methodology: str = (
-        "Leakage-safe comparison of v0.4, v0.5, v0.7 proxy, and v0.9.1 challenger stages "
-        "trained before the target season using alternative starter shrinkage, starter-workload "
-        "interaction, prior-season park factors, and validation-only calibration selection"
+        "Leakage-safe comparison of v0.4, v0.5, linear v0.9 features, and v0.12 model-family challengers "
+        "trained before the target season using chronological validation, calibration, and a guarded champion/challenger promotion rule"
     )
 
 
@@ -367,3 +395,63 @@ class EdgePerformanceResponse(BaseModel):
     metrics: list[EdgePerformanceMetrics] = Field(default_factory=list)
     recent_candidates: list[EdgePerformanceBet] = Field(default_factory=list)
     note: str
+
+
+class PropSideQuote(BaseModel):
+    side: Literal["YES", "NO"]
+    token_id: str
+    model_probability: float = Field(ge=0, le=1)
+    executable_price: float | None = Field(default=None, ge=0, le=1)
+    edge: float | None = None
+    expected_roi: float | None = None
+    fully_fillable: bool = False
+    levels_consumed: int = 0
+
+
+class StrikeoutPropPrediction(BaseModel):
+    market_id: str
+    question: str
+    player_id: int
+    player_name: str
+    game_pk: int
+    opponent: str
+    start_time: str
+    threshold: int = Field(ge=1)
+    projected_innings: float = Field(ge=0)
+    expected_batters_faced: float = Field(ge=0)
+    pitcher_k_rate: float = Field(ge=0, le=1)
+    opponent_lineup_k_rate: float = Field(ge=0, le=1)
+    matchup_k_rate: float = Field(ge=0, le=1)
+    expected_strikeouts: float = Field(ge=0)
+    probability_yes: float = Field(ge=0, le=1)
+    probability_no: float = Field(ge=0, le=1)
+    yes: PropSideQuote
+    no: PropSideQuote
+    recommended_side: Literal["YES", "NO"] | None = None
+    signal: Literal["BET", "LEAN", "PASS"]
+    lineup_status: Literal["CONFIRMED", "LEAGUE_FALLBACK"]
+    hitters_used: int = 0
+    polymarket_url: str
+    volume: float | None = None
+    liquidity: float | None = None
+    model_version: str = "v0.12.1-poisson-k"
+
+
+class PropBoardResponse(BaseModel):
+    generated_at: datetime
+    season: int
+    stake_dollars: float = Field(gt=0)
+    model_version: str
+    props: list[StrikeoutPropPrediction]
+    diagnostics: dict[str, int] = Field(default_factory=dict)
+
+
+class PropSettlementResponse(BaseModel):
+    game_pk: int
+    player_id: int
+    threshold: int = Field(ge=1)
+    side: Literal["YES", "NO"]
+    game_status: str
+    strikeouts: int | None = Field(default=None, ge=0)
+    status: Literal["open", "won", "lost", "refunded"]
+    won: bool | None = None

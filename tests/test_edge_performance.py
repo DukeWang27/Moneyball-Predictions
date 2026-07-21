@@ -41,7 +41,7 @@ def test_archived_edge_performance_uses_honest_entry_and_closing_snapshot() -> N
             "sabermetric_support_count_a": 2,
             "sabermetric_support_total_a": 2,
             "sabermetric_support_b": "CONTRARIAN",
-            "model_version": "v0.9.1 test",
+            "model_version": "v0.9.2 test",
         },
         {
             "captured_at": "2026-07-20T19:55:00+00:00",
@@ -59,7 +59,7 @@ def test_archived_edge_performance_uses_honest_entry_and_closing_snapshot() -> N
             "sabermetric_support_count_a": 2,
             "sabermetric_support_total_a": 2,
             "sabermetric_support_b": "CONTRARIAN",
-            "model_version": "v0.9.1 test",
+            "model_version": "v0.9.2 test",
         },
     ]
 

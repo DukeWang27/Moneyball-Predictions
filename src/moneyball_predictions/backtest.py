@@ -25,8 +25,6 @@ from .optimized import (
     FEATURE_NAMES,
     ModelVariant,
     build_target_rows,
-    prepare_optimized_model,
-    prepare_optimized_model_multifold,
 )
 from .schemas import (
     BacktestCalibrationBucket,
@@ -36,6 +34,12 @@ from .schemas import (
     BacktestLeakageAudit,
     BacktestModelMetrics,
     BacktestResponse,
+    BacktestTournamentModel,
+)
+from .tournament import (
+    ModelTournamentArtifact,
+    prepare_model_tournament,
+    prepare_model_tournament_multifold,
 )
 
 EASTERN = ZoneInfo("America/New_York")
@@ -552,12 +556,15 @@ def evaluate_walk_forward_games(
     prior_games: list[MlbGameState] | None = None,
     training_games_by_season: dict[int, list[MlbGameState]] | None = None,
 ) -> BacktestResponse:
-    """Compare v0.4, v0.5, v0.7, and v0.9 using only pregame information."""
+    """Compare legacy models and the guarded v0.12 model tournament."""
     optimized_probability: dict[int, float] = {}
     variant_probability_maps: dict[str, dict[int, float]] = {}
+    tournament_probability_maps: dict[str, dict[int, float]] = {}
+    tournament_artifact: ModelTournamentArtifact | None = None
     optimized_artifact = None
     selected_optimized_variant = None
-    optimized_label = "Component-aware v0.9"
+    selected_tournament_candidate = None
+    optimized_label = "Model tournament v0.12"
     target_feature_rows = []
     training_seasons: list[int] = []
     calibration_seasons: list[int] = []
@@ -565,7 +572,7 @@ def evaluate_walk_forward_games(
     required = (season - 4, season - 3, season - 2, season - 1)
     fallback_required = (season - 3, season - 2, season - 1)
     if training_games_by_season and all(year in training_games_by_season for year in required):
-        optimized_artifact, target_prior, target_elo = prepare_optimized_model_multifold(
+        preparation = prepare_model_tournament_multifold(
             earlier_seed_games=training_games_by_season[season - 4],
             earlier_training_games=training_games_by_season[season - 3],
             earlier_validation_games=training_games_by_season[season - 2],
@@ -575,17 +582,25 @@ def evaluate_walk_forward_games(
             min_games=min_games,
             fold_years=(season - 2, season - 1),
         )
+        tournament_artifact = preparation.artifact
+        optimized_artifact = tournament_artifact.linear_artifact
+        target_prior = preparation.prior_summary
+        target_elo = preparation.prior_elo
     elif training_games_by_season and all(
         year in training_games_by_season for year in fallback_required
     ):
-        optimized_artifact, target_prior, target_elo = prepare_optimized_model(
+        preparation = prepare_model_tournament(
             seed_games=training_games_by_season[season - 3],
             training_games=training_games_by_season[season - 2],
             validation_games=training_games_by_season[season - 1],
             min_games=min_games,
         )
+        tournament_artifact = preparation.artifact
+        optimized_artifact = tournament_artifact.linear_artifact
+        target_prior = preparation.prior_summary
+        target_elo = preparation.prior_elo
 
-    if optimized_artifact is not None:
+    if optimized_artifact is not None and tournament_artifact is not None:
         target_feature_rows, _ = build_target_rows(
             games=games,
             prior_summary=target_prior,
@@ -593,10 +608,14 @@ def evaluate_walk_forward_games(
             min_games=min_games,
         )
         training_seasons = [season - 2]
-        calibration_seasons = list(optimized_artifact.selection_folds) or [season - 1]
+        calibration_seasons = list(tournament_artifact.selection_folds) or [season - 1]
         for name, variant in optimized_artifact.variants.items():
             variant_probability_maps[name] = {
                 row.game.game_pk: variant.predict(row.features) for row in target_feature_rows
+            }
+        for name, candidate in tournament_artifact.candidates.items():
+            tournament_probability_maps[name] = {
+                row.game.game_pk: candidate.predict(row.features) for row in target_feature_rows
             }
         target_component_coverage = (
             sum(1 for row in target_feature_rows if row.component_starter_covered)
@@ -609,21 +628,17 @@ def evaluate_walk_forward_games(
             and optimized_artifact.validation_component_coverage >= 0.70
             and target_component_coverage >= 0.70
         )
-        selected_optimized_variant = (
-            optimized_artifact.champion
-            if component_ready
-            else optimized_artifact.variants["v07"]
-        )
-        selected_variant_name = next(
-            (name for name, item in optimized_artifact.variants.items() if item is selected_optimized_variant),
-            "v07",
-        )
-        optimized_probability = variant_probability_maps.get(selected_variant_name, {})
-        optimized_label = (
-            f"v0.9.1 {selected_optimized_variant.label}"
-            if component_ready
-            else "v0.7 proxy (pitching sync required)"
-        )
+        selected_optimized_variant = optimized_artifact.champion
+        if component_ready:
+            selected_tournament_candidate = tournament_artifact.champion
+            optimized_probability = tournament_probability_maps.get(
+                tournament_artifact.champion_key, {}
+            )
+            optimized_label = f"v0.12 {selected_tournament_candidate.label}"
+        else:
+            selected_optimized_variant = optimized_artifact.variants["v07"]
+            optimized_probability = variant_probability_maps.get("v07", {})
+            optimized_label = "v0.7 proxy (pitching sync required)"
 
     priors = _season_priors(prior_games or [])
     calibration_rows = _training_rows_from_prior_season(
@@ -750,6 +765,7 @@ def evaluate_walk_forward_games(
             "Park": "+ prior-season park interaction",
             "StarterSplit": "+ separate K/BB/HR starter rates",
             "ParkNeutralSplit": "+ park-neutral team strength",
+            "BaseRunsStarter": "+ Base Runs/Pythagenpat team strength",
             "BullpenQuality": "+ bullpen quality (experimental)",
             "Full": "+ fatigue (experimental)",
         }
@@ -760,6 +776,7 @@ def evaluate_walk_forward_games(
             "Park",
             "StarterSplit",
             "ParkNeutralSplit",
+            "BaseRunsStarter",
             "BullpenQuality",
             "Full",
         ):
@@ -769,6 +786,47 @@ def evaluate_walk_forward_games(
                     variant_probability_maps.get(name, {}),
                     key=name.lower(),
                     label=labels[name],
+                )
+            )
+
+    tournament_models: list[BacktestTournamentModel] = []
+    if tournament_artifact:
+        for key in ("logistic", "boosted_tree", "expected_runs", "ensemble"):
+            candidate = tournament_artifact.candidates.get(key)
+            if candidate is None:
+                continue
+            target_metrics = _variant_metrics(
+                predictions,
+                tournament_probability_maps.get(key, {}),
+                key=f"tournament-{key}",
+                label=candidate.label,
+            )
+            fold_briers = list(tournament_artifact.fold_briers.get(key, ()))
+            fold_logs = list(tournament_artifact.fold_log_losses.get(key, ()))
+            tournament_models.append(
+                BacktestTournamentModel(
+                    key=key,
+                    label=candidate.label,
+                    family=candidate.family,
+                    selected=key == tournament_artifact.champion_key,
+                    promoted=(
+                        key == tournament_artifact.champion_key
+                        and tournament_artifact.promoted_challenger
+                    ),
+                    validation_brier_mean=(
+                        float(np.mean(fold_briers)) if fold_briers else None
+                    ),
+                    validation_log_loss_mean=(
+                        float(np.mean(fold_logs)) if fold_logs else None
+                    ),
+                    fold_briers=fold_briers,
+                    fold_log_losses=fold_logs,
+                    target_accuracy=target_metrics.accuracy,
+                    target_brier=target_metrics.brier_score,
+                    target_log_loss=target_metrics.log_loss,
+                    prediction_count=target_metrics.prediction_count,
+                    calibration_method=candidate.calibration_method,
+                    blend_weights=list(candidate.blend_weights),
                 )
             )
 
@@ -848,19 +906,32 @@ def evaluate_walk_forward_games(
             else 0.0
         ),
         optimized_shrinkage=(
-            selected_optimized_variant.shrinkage if selected_optimized_variant else 0.0
+            selected_optimized_variant.shrinkage
+            if selected_optimized_variant
+            and selected_tournament_candidate is not None
+            and tournament_artifact is not None
+            and tournament_artifact.champion_key == "logistic"
+            else 0.0
         ),
         optimized_calibration_method=(
-            selected_optimized_variant.calibration_method
-            if selected_optimized_variant
-            else "identity"
+            selected_tournament_candidate.calibration_method
+            if selected_tournament_candidate
+            else (
+                selected_optimized_variant.calibration_method
+                if selected_optimized_variant
+                else "identity"
+            )
         ),
         optimized_coefficients=(
             selected_optimized_variant.model.coefficient_map()
             if selected_optimized_variant
             else {}
         ),
-        optimized_variant=(selected_optimized_variant.label if selected_optimized_variant else ""),
+        optimized_variant=(
+            selected_tournament_candidate.label
+            if selected_tournament_candidate
+            else (selected_optimized_variant.label if selected_optimized_variant else "")
+        ),
         feature_diagnostics=_feature_diagnostics(
             target_feature_rows, selected_optimized_variant
         ),
@@ -869,6 +940,19 @@ def evaluate_walk_forward_games(
         ),
         training_seasons=training_seasons,
         calibration_seasons=calibration_seasons,
+        tournament_models=tournament_models,
+        tournament_champion=(
+            tournament_artifact.champion.label if tournament_artifact else ""
+        ),
+        tournament_decision=(
+            tournament_artifact.champion_reason if tournament_artifact else ""
+        ),
+        tournament_promoted=(
+            tournament_artifact.promoted_challenger if tournament_artifact else False
+        ),
+        tournament_selection_folds=(
+            list(tournament_artifact.selection_folds) if tournament_artifact else []
+        ),
         leakage_audit=BacktestLeakageAudit(),
     )
 
@@ -899,7 +983,7 @@ async def build_mlb_backtest(
 
     years = [season - 4, season - 3, season - 2, season - 1]
     timeout = httpx.Timeout(90.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.9.1 backtest"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.12.0 backtest"}
 
     async def fetch_year(client: httpx.AsyncClient, year: int) -> tuple[int, list[MlbGameState]]:
         return (

@@ -57,6 +57,21 @@ def _innings_to_outs(value: object) -> int:
         return 0
 
 
+
+
+@dataclass(frozen=True)
+class MlbBattingLine:
+    """One team's batting totals from the official game box score."""
+
+    at_bats: int = 0
+    hits: int = 0
+    doubles: int = 0
+    triples: int = 0
+    home_runs: int = 0
+    walks: int = 0
+    intentional_walks: int = 0
+    hit_by_pitch: int = 0
+
 @dataclass(frozen=True)
 class MlbTeamStats:
     team_id: int
@@ -85,6 +100,8 @@ class MlbGameState:
     home_probable_pitcher: str | None
     venue: str | None
     game_type: str | None = None
+    away_team_id: int | None = None
+    home_team_id: int | None = None
     away_probable_pitcher_id: int | None = None
     home_probable_pitcher_id: int | None = None
     away_first5_runs: int | None = None
@@ -95,6 +112,8 @@ class MlbGameState:
     home_lineup_ids: tuple[int, ...] = ()
     away_lineup_names: tuple[str, ...] = ()
     home_lineup_names: tuple[str, ...] = ()
+    away_batting: MlbBattingLine | None = None
+    home_batting: MlbBattingLine | None = None
 
     @property
     def away_starter_line(self) -> MlbPitchingLine | None:
@@ -211,6 +230,8 @@ def _parse_schedule_payload(payload: object) -> list[MlbGameState]:
                     home_probable_pitcher=_optional_text(home_pitcher.get("fullName")),
                     venue=_optional_text(venue.get("name")),
                     game_type=_optional_text(raw_game.get("gameType")),
+                    away_team_id=_safe_int(away_team_payload.get("id")),
+                    home_team_id=_safe_int(home_team_payload.get("id")),
                     away_probable_pitcher_id=_safe_int(away_pitcher.get("id")),
                     home_probable_pitcher_id=_safe_int(home_pitcher.get("id")),
                     away_first5_runs=_first_five_runs(linescore, "away"),
@@ -290,6 +311,25 @@ def _parse_lineup_side(payload: object) -> tuple[tuple[int, ...], tuple[str, ...
     )
 
 
+def _parse_team_batting(payload: object) -> MlbBattingLine | None:
+    if not isinstance(payload, dict):
+        return None
+    team_stats = payload.get("teamStats") or {}
+    batting = team_stats.get("batting") if isinstance(team_stats, dict) else None
+    if not isinstance(batting, dict):
+        return None
+    return MlbBattingLine(
+        at_bats=_safe_int(batting.get("atBats")) or 0,
+        hits=_safe_int(batting.get("hits")) or 0,
+        doubles=_safe_int(batting.get("doubles")) or 0,
+        triples=_safe_int(batting.get("triples")) or 0,
+        home_runs=_safe_int(batting.get("homeRuns")) or 0,
+        walks=_safe_int(batting.get("baseOnBalls")) or 0,
+        intentional_walks=_safe_int(batting.get("intentionalWalks")) or 0,
+        hit_by_pitch=_safe_int(batting.get("hitByPitch")) or 0,
+    )
+
+
 def attach_boxscore_payload(game: MlbGameState, payload: object) -> MlbGameState:
     """Return a game enriched with official per-pitcher box-score lines."""
     if not isinstance(payload, dict):
@@ -307,6 +347,8 @@ def attach_boxscore_payload(game: MlbGameState, payload: object) -> MlbGameState
         home_lineup_ids=home_ids,
         away_lineup_names=away_names,
         home_lineup_names=home_names,
+        away_batting=_parse_team_batting(teams.get("away")),
+        home_batting=_parse_team_batting(teams.get("home")),
     )
 
 

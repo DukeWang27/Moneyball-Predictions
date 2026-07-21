@@ -1,0 +1,13 @@
+{
+  "order_book": {
+    "asks": [
+      {"price": "0.50", "size": "20"},
+      {"price": "0.52", "size": "60"},
+      {"price": "0.55", "size": "100"}
+    ]
+  },
+  "desired_dollars": 50,
+  "model_probability": 0.60,
+  "maximum_price": 0.56,
+  "fee_dollars": 0
+}

@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Moneyball Predictions</title>
+  <link rel="stylesheet" href="/static/app.css" />
   <style>
     :root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif; }
     * { box-sizing: border-box; }
@@ -69,7 +70,7 @@
     .bet-placed { border: 1px solid #315d82; border-radius: 9px; padding: 9px; color: #9ed1ff; background: #0d1c2a; font-size: 12px; font-weight: 800; text-align: center; }
     .market-detail { grid-column: 2 / -1; color: #91a0b4; font-size: 12px; line-height: 1.55; border-top: 1px solid #232b38; padding-top: 10px; }
     .paper-list { display: grid; gap: 10px; }
-    .bet-row { padding: 14px; display: grid; grid-template-columns: 1.4fr .8fr .8fr .8fr; gap: 12px; align-items: center; }
+    .bet-row { padding: 14px; display: grid; grid-template-columns: 1.4fr .7fr .7fr .7fr .9fr; gap: 12px; align-items: center; }
     .positive { color: #70e59e; }
     .negative { color: #ff9196; }
     .error { color: #ff969a; background: #251117; border: 1px solid #62313c; border-radius: 12px; padding: 14px; white-space: pre-wrap; }
@@ -85,6 +86,8 @@
     th { color: #8f9bad; font-weight: 700; }
     tr:last-child td { border-bottom: 0; }
     .history-note { margin-top: 10px; color: #8491a4; font-size: 12px; line-height: 1.5; }
+    .help-text { max-width: 420px; color: #8491a4; font-size: 12px; line-height: 1.45; }
+    .prop-action { display: grid; gap: 7px; min-width: 130px; }
 
     .support-line { margin-top: 6px; font-size: 11px; font-weight: 800; }
     .support-CONFIRMED { color: #7ee7a1; }
@@ -111,9 +114,9 @@
 <main>
   <div class="topbar">
     <section>
-      <div class="eyebrow">MLB · Polymarket board + edge lab · v0.9.1</div>
+      <div class="eyebrow">MLB · Polymarket board + institutional prop lab · v0.12.1</div>
       <h1>Live markets, saved paper bets, and an optimized pregame model.</h1>
-      <p class="lede">Games stay in official first-pitch order. v0.9.1 separates economic price edge from sabermetric confirmation, grades archived pregame signals by ROI and CLV, records confirmed lineups, and prevents duplicate paper bets. Bill James-style team strength helps estimate fair probability; a bet still needs a favorable executable price.</p>
+      <p class="lede">Games stay in official first-pitch order. v0.12.1 adds prop paper betting, official strikeout settlement, and clearer executable-price controls while retaining the guarded model tournament.</p>
     </section>
     <aside class="controls">
       <label for="kelly">Kelly sizing</label>
@@ -127,6 +130,7 @@
       <label for="bet-strategy">Paper-bet filter</label>
       <select id="bet-strategy"><option value="confirmed" selected>Require sabermetric confirmation</option><option value="all">All economic BET signals</option></select>
       <button id="refresh">Refresh data</button>
+      <button id="release-notes-button" class="secondary release-button" type="button">Release Notes</button>
     </aside>
   </div>
 
@@ -154,6 +158,22 @@
   <section class="section">
     <div class="section-head"><div><div class="eyebrow">Polymarket-style schedule</div><h2>Moneylines by first pitch</h2></div><div class="muted">Earliest game first.</div></div>
     <div id="games"></div>
+  </section>
+
+
+  <section class="section">
+    <div class="section-head">
+      <div><div class="eyebrow">Player markets</div><h2>Pitcher strikeout props</h2></div>
+      <div class="props-controls">
+        <label>Order-book quote size ($)<input id="prop-stake" type="number" min="1" max="100000" step="1" value="50" /></label>
+        <button id="refresh-props" type="button">Refresh props</button>
+      </div>
+    </div>
+    <div class="help-text">This amount is not a bet. It tells the app how many dollars of asks to walk when calculating the executable VWAP. Prop paper bets use quarter Kelly and are capped at 1% of your available paper cash.</div>
+    <div id="props-status" class="muted" style="margin-top:8px">Loading active Polymarket strikeout props…</div>
+    <div id="props-summary" class="summary-grid" style="margin-top:12px"></div>
+    <div id="props-table" style="margin-top:12px"></div>
+    <div class="history-note">Poisson is a transparent baseline, not a guaranteed final distribution. BET requires a fully fillable quote size plus at least 5% executable edge and 5% expected ROI. Paper-bet buttons appear only before first pitch.</div>
   </section>
 
   <section class="section">
@@ -189,7 +209,7 @@
       </div>
     </div>
     <div id="backtest-status" class="muted">Loading historical results…</div>
-    <h3>Optimized v0.9</h3>
+    <h3>Selected v0.12 champion</h3>
     <div id="backtest-metrics" class="summary-grid" style="margin-top:12px"></div>
     <h3>Enhanced v0.5</h3>
     <div id="enhanced-metrics" class="summary-grid" style="margin-top:12px"></div>
@@ -199,7 +219,10 @@
     <div class="history-note">Accuracy = winner picks. Brier = probability error: lower is better, 0 is perfect, and 0.25 is coin-flip level. Log loss = confidence penalty. Historical betting ROI still requires archived pregame odds.</div>
     <h3>Ablation</h3>
     <div id="ablation-table"></div>
-    <h3>Drivers</h3>
+    <h3>Model tournament</h3>
+    <div id="tournament-decision" class="notice"></div>
+    <div id="tournament-table"></div>
+    <h3>Linear driver weights</h3>
     <div id="coefficient-table"></div>
     <h3>Feature diagnostics</h3>
     <div id="feature-diagnostics"></div>
@@ -219,6 +242,15 @@
   </details>
 
   <div class="notice section"><strong>Kelly sizing:</strong> paper only. Every suggested stake is capped at 1% of available bankroll. Economic edge always means model probability versus executable price. Sabermetric confirmation is an optional strategy filter and is never added to the probability twice.</div>
+
+  <dialog id="release-notes-modal" class="release-modal">
+    <div class="release-modal-head">
+      <div><div class="eyebrow">Changelog</div><h2>Release Notes</h2></div>
+      <button id="close-release-notes" class="secondary" type="button">Close</button>
+    </div>
+    <div id="release-notes-content" class="release-content"></div>
+  </dialog>
+
   <footer>Paper-trading research only. Open the linked event to place an actual Polymarket trade. The app does not store wallet credentials or submit real-money orders.</footer>
 </main>
 <script>
@@ -228,7 +260,14 @@
   const money = (value) => `${Number(value) >= 0 ? '+' : '-'}$${Math.abs(Number(value)).toFixed(2)}`;
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));
   const ACCOUNT_KEY = 'moneyballPaperAccountV1';
+
+  const teamLogoUrl = (teamId) => teamId ? `https://www.mlbstatic.com/team-logos/${teamId}.svg` : '';
+  const playerHeadshotUrl = (playerId) => `https://securea.mlb.com/mlb/images/players/head_shot/${playerId}.jpg`;
+  const teamIdentity = (name, teamId) => teamId
+    ? `<span class="team-identity"><img class="team-logo" src="${teamLogoUrl(teamId)}" alt="" loading="lazy" onerror="this.style.display='none'"><span>${esc(name)}</span></span>`
+    : esc(name);
   let latestData = null;
+  let latestPropsData = null;
   let latestEdgeData = null;
 
   function safeDate(value) {
@@ -271,13 +310,29 @@
     localStorage.setItem(ACCOUNT_KEY, JSON.stringify(account));
   }
 
+  function isPropBet(bet) {
+    return bet && bet.betType === 'strikeout_prop';
+  }
+
   function paperBetForGame(gamePk) {
-    return loadAccount().bets.find(bet => Number(bet.gamePk) === Number(gamePk) && bet.status !== 'refunded') || null;
+    return loadAccount().bets.find(bet => !isPropBet(bet) && Number(bet.gamePk) === Number(gamePk) && bet.status !== 'refunded') || null;
+  }
+
+  function paperBetForProp(marketId) {
+    return loadAccount().bets.find(bet => isPropBet(bet) && String(bet.marketId) === String(marketId) && bet.status !== 'refunded') || null;
+  }
+
+  function storedBetEdge(bet) {
+    const edge = Number(bet && bet.edge);
+    return Number.isFinite(edge) ? pct(edge) : '—';
   }
 
   function paperBetSummary(bet) {
     if (!bet) return '';
-    return `Paper bet placed · ${esc(bet.team)} · $${Number(bet.stake).toFixed(2)} · ${esc(String(bet.status || 'open').toUpperCase())}`;
+    const selection = isPropBet(bet)
+      ? `${esc(bet.playerName)} ${Number(bet.threshold)}+ K · ${esc(bet.side)}`
+      : esc(bet.team);
+    return `Paper bet placed · ${selection} · $${Number(bet.stake).toFixed(2)} · Entry edge ${storedBetEdge(bet)} · ${esc(String(bet.status || 'open').toUpperCase())}`;
   }
 
   function renderAccount() {
@@ -293,6 +348,10 @@
           return sum + Math.pow(Number(bet.modelProbability) - outcome, 2);
         }, 0) / graded.length
       : null;
+    const edgeBets = account.bets.filter(bet => Number.isFinite(Number(bet.edge)));
+    const averageEntryEdge = edgeBets.length
+      ? edgeBets.reduce((sum, bet) => sum + Number(bet.edge), 0) / edgeBets.length
+      : null;
     const openCost = open.reduce((sum, bet) => sum + bet.stake, 0);
     const equity = account.cash + openCost;
     const pnl = equity - account.startingBankroll;
@@ -303,19 +362,29 @@
       <div class="summary-card"><span>Open</span><div class="metric-word">Pending</div><strong>${open.length}</strong></div>
       <div class="summary-card"><span>Accuracy</span><div class="metric-word">Correct</div><strong>${paperAccuracy == null ? '—' : pct(paperAccuracy)}</strong></div>
       <div class="summary-card"><span>Brier</span><div class="metric-word">Error</div><strong>${paperBrier == null ? '—' : paperBrier.toFixed(3)}</strong></div>
+      <div class="summary-card"><span>Avg edge</span><div class="metric-word">At entry</div><strong>${averageEntryEdge == null ? '—' : pct(averageEntryEdge)}</strong></div>
       <div class="summary-card"><span>Settled</span><div class="metric-word">Sample</div><strong>${settled.length}</strong></div>`;
 
     if (!account.bets.length) {
       byId('paper-bets').innerHTML = '<div class="notice">No paper bets yet. Use a green Kelly-sized paper-bet button.</div>';
       return;
     }
-    byId('paper-bets').innerHTML = [...account.bets].reverse().map(bet => `
+    byId('paper-bets').innerHTML = [...account.bets].reverse().map(bet => {
+      const primary = isPropBet(bet)
+        ? `${esc(bet.playerName)} ${Number(bet.threshold)}+ K · ${esc(bet.side)}`
+        : esc(bet.team);
+      const actual = isPropBet(bet) && Number.isFinite(Number(bet.actualStrikeouts))
+        ? ` · Actual ${Number(bet.actualStrikeouts)} K`
+        : '';
+      return `
       <div class="bet-row">
-        <div><strong>${esc(bet.team)}</strong><div class="muted">${esc(bet.title)} · ${safeDate(bet.startTime)}</div></div>
+        <div><strong>${primary}</strong><div class="muted">${esc(bet.title)} · ${safeDate(bet.startTime)}</div></div>
         <div><span class="muted">Stake</span><br><strong>$${Number(bet.stake).toFixed(2)}</strong></div>
         <div><span class="muted">Price</span><br><strong>${cents(bet.price)}</strong></div>
-        <div><span class="muted">Status</span><br><strong class="${bet.status === 'won' ? 'positive' : bet.status === 'lost' ? 'negative' : ''}">${esc(bet.status.toUpperCase())}${bet.profit != null ? ` · ${money(bet.profit)}` : ''}</strong></div>
-      </div>`).join('');
+        <div><span class="muted">Entry edge</span><br><strong class="${Number(bet.edge) >= 0 ? 'positive' : 'negative'}">${storedBetEdge(bet)}</strong></div>
+        <div><span class="muted">Status</span><br><strong class="${bet.status === 'won' ? 'positive' : bet.status === 'lost' ? 'negative' : ''}">${esc(bet.status.toUpperCase())}${actual}${bet.profit != null ? ` · ${money(bet.profit)}` : ''}</strong></div>
+      </div>`;
+    }).join('');
   }
 
   async function settlePaperBets(scoreboard) {
@@ -323,7 +392,39 @@
     const open = account.bets.filter(bet => bet.status === 'open');
     if (!open.length) return;
     const gameMap = new Map(scoreboard.map(game => [game.game_pk, game]));
+
     for (const bet of open) {
+      if (isPropBet(bet)) {
+        try {
+          const query = new URLSearchParams({
+            game_pk: String(bet.gamePk),
+            player_id: String(bet.playerId),
+            threshold: String(bet.threshold),
+            side: String(bet.side),
+          });
+          const response = await fetch(`/api/v1/props/strikeouts/settlement?${query}`);
+          if (!response.ok) continue;
+          const result = await response.json();
+          if (result.status === 'open') continue;
+          if (result.status === 'refunded') {
+            bet.status = 'refunded';
+            bet.profit = 0;
+            account.cash += bet.stake;
+            continue;
+          }
+          bet.actualStrikeouts = result.strikeouts;
+          if (result.status === 'won') {
+            account.cash += bet.shares;
+            bet.status = 'won';
+            bet.profit = bet.shares - bet.stake;
+          } else if (result.status === 'lost') {
+            bet.status = 'lost';
+            bet.profit = -bet.stake;
+          }
+        } catch (_) {}
+        continue;
+      }
+
       let game = gameMap.get(bet.gamePk);
       if (!game) {
         try {
@@ -451,8 +552,8 @@
     return `<article class="market-row">
       <div class="market-time">${timeOnly(game.start_time)}<small>MLB</small></div>
       <div class="matchup">
-        <div class="team-row"><span class="team-name">${esc(game.away_team)}</span><span class="team-note">Away</span></div>
-        <div class="team-row"><span class="team-name">${esc(game.home_team)}</span><span class="team-note">Home</span></div>
+        <div class="team-row"><span class="team-name">${teamIdentity(game.away_team, game.away_team_id)}</span><span class="team-note">Away</span></div>
+        <div class="team-row"><span class="team-name">${teamIdentity(game.home_team, game.home_team_id)}</span><span class="team-note">Home</span></div>
       </div>
       <div class="prices">${priceBox(game.side_a, game)}${priceBox(game.side_b, game)}</div>
       <div class="market-action">
@@ -485,8 +586,8 @@
     const link = game.polymarket_url ? `<a class="button secondary" href="${esc(game.polymarket_url)}" target="_blank" rel="noreferrer">Market</a>` : '';
     return `<article class="score-card">
       <div class="score-head"><div><span class="badge ${badgeClass}">${esc(status)}</span></div>${link}</div>
-      <div class="score-line"><span>${esc(game.away_team)}</span><strong>${game.away_score ?? '—'}</strong></div>
-      <div class="score-line"><span>${esc(game.home_team)}</span><strong>${game.home_score ?? '—'}</strong></div>
+      <div class="score-line"><span>${teamIdentity(game.away_team, game.away_team_id)}</span><strong>${game.away_score ?? '—'}</strong></div>
+      <div class="score-line"><span>${teamIdentity(game.home_team, game.home_team_id)}</span><strong>${game.home_score ?? '—'}</strong></div>
       <div class="score-note">${safeDate(game.game_date)} · ${esc(game.venue || 'Venue TBD')}<br>${esc(game.live_bet_message)}</div>
     </article>`;
   }
@@ -556,7 +657,7 @@
       Accuracy: ${deltaText(data.accuracy_delta, 'accuracy')} ·
       Brier improvement: ${deltaText(data.brier_delta, 'brier')} ·
       Log-loss improvement: ${deltaText(data.log_loss_delta, 'log')}<br>
-      <span class="muted">Positive changes mean v0.9 improved. The coefficients and calibrator were fit before ${data.season}; the target season was not used to choose them.<br>Proxy starter coverage — train ${pct(data.optimized_training_starter_coverage || 0)} · validation ${pct(data.optimized_validation_starter_coverage || 0)} · test ${pct(data.target_starter_coverage || 0)}.<br>Component starter coverage — train ${pct(data.optimized_training_component_coverage || 0)} · validation ${pct(data.optimized_validation_component_coverage || 0)} · test ${pct(data.target_component_coverage || 0)}. Bullpen box-score coverage — train ${pct(data.optimized_training_bullpen_coverage || 0)} · validation ${pct(data.optimized_validation_bullpen_coverage || 0)} · test ${pct(data.target_bullpen_coverage || 0)}.</span>`;
+      <span class="muted">Positive changes mean the selected v0.12 champion improved. Every candidate was fit and selected before ${data.season}; the target season was displayed only after selection.<br>Proxy starter coverage — train ${pct(data.optimized_training_starter_coverage || 0)} · validation ${pct(data.optimized_validation_starter_coverage || 0)} · test ${pct(data.target_starter_coverage || 0)}.<br>Component starter coverage — train ${pct(data.optimized_training_component_coverage || 0)} · validation ${pct(data.optimized_validation_component_coverage || 0)} · test ${pct(data.target_component_coverage || 0)}. Bullpen box-score coverage — train ${pct(data.optimized_training_bullpen_coverage || 0)} · validation ${pct(data.optimized_validation_bullpen_coverage || 0)} · test ${pct(data.target_bullpen_coverage || 0)}.</span>`;
 
     const ablationRows = (data.ablations || []).map(model => `
       <tr><td>${esc(model.label)}</td><td>${model.accuracy == null ? '—' : pct(model.accuracy)}</td><td>${model.brier_score == null ? '—' : Number(model.brier_score).toFixed(3)}</td><td>${model.log_loss == null ? '—' : Number(model.log_loss).toFixed(3)}</td><td>${model.prediction_count}</td></tr>`).join('');
@@ -564,11 +665,21 @@
       ? `<div class="table-wrap"><table><thead><tr><th>Model</th><th>Accuracy</th><th>Brier</th><th>Log loss</th><th>Games</th></tr></thead><tbody>${ablationRows}</tbody></table></div>`
       : '<div class="notice">Ablations require the three pre-target training seasons.</div>';
 
+    const tournamentRows = (data.tournament_models || []).map(model => {
+      const folds = (model.fold_briers || []).map(value => Number(value).toFixed(4)).join(' / ') || '—';
+      const weights = (model.blend_weights || []).length ? model.blend_weights.map(value => Number(value).toFixed(2)).join(' / ') : '—';
+      return `<tr><td>${model.selected ? '<strong class="positive">CHAMPION</strong> ' : ''}${esc(model.label)}</td><td>${esc(model.family)}</td><td>${model.validation_brier_mean == null ? '—' : Number(model.validation_brier_mean).toFixed(4)}</td><td>${folds}</td><td>${model.target_accuracy == null ? '—' : pct(model.target_accuracy)}</td><td>${model.target_brier == null ? '—' : Number(model.target_brier).toFixed(4)}</td><td>${model.target_log_loss == null ? '—' : Number(model.target_log_loss).toFixed(4)}</td><td>${esc(model.calibration_method)}</td><td>${weights}</td></tr>`;
+    }).join('');
+    byId('tournament-decision').innerHTML = `<strong>${data.tournament_promoted ? 'Challenger promoted' : 'Champion retained'}</strong> · ${esc(data.tournament_champion || 'Unavailable')}<br><span class="muted">${esc(data.tournament_decision || 'No tournament decision was available.')}</span>`;
+    byId('tournament-table').innerHTML = tournamentRows
+      ? `<div class="table-wrap"><table><thead><tr><th>Model</th><th>Family</th><th>Validation Brier</th><th>Fold Briers</th><th>Target accuracy</th><th>Target Brier</th><th>Target log loss</th><th>Calibration</th><th>Blend L/T/R</th></tr></thead><tbody>${tournamentRows}</tbody></table></div><div class="history-note">Target results never choose the champion. L/T/R weights mean logistic, tree, and expected-runs probabilities.</div>`
+      : '<div class="notice">The model tournament requires four complete pre-target seasons.</div>';
+
     const coefficientRows = Object.entries(data.optimized_coefficients || {}).map(([name, value]) => `
       <tr><td>${esc(name)}</td><td>${Number(value).toFixed(3)}</td><td>${Number(value) > 0 ? 'Home' : Number(value) < 0 ? 'Away' : 'Flat'}</td></tr>`).join('');
     byId('coefficient-table').innerHTML = coefficientRows
       ? `<div class="table-wrap"><table><thead><tr><th>Driver</th><th>Weight</th><th>Direction</th></tr></thead><tbody>${coefficientRows}</tbody></table></div><div class="history-note">Weights use standardized inputs, so larger absolute values indicate stronger influence within this model. They do not prove causation.</div>`
-      : '<div class="notice">No trained v0.9 coefficients were available.</div>';
+      : '<div class="notice">No trained linear reference coefficients were available.</div>';
 
     const diagnosticRows = (data.feature_diagnostics || []).map(item => `
       <tr><td>${esc(item.name)}</td><td>${Number(item.mean).toFixed(4)}</td><td>${Number(item.std).toFixed(4)}</td><td>${Number(item.p05).toFixed(4)}</td><td>${Number(item.median).toFixed(4)}</td><td>${Number(item.p95).toFixed(4)}</td><td>${item.unique_values}</td><td class="${item.near_constant ? 'negative' : 'positive'}">${item.near_constant ? 'Weak spread' : 'Useful spread'}</td><td>${item.coefficient == null ? '—' : Number(item.coefficient).toFixed(3)}</td></tr>`).join('');
@@ -601,7 +712,7 @@
     const rows = data.recent_predictions.map(game => `
       <tr><td>${new Date(game.game_date).toLocaleDateString()}</td><td>${esc(game.away_team)} ${game.away_score}–${game.home_score} ${esc(game.home_team)}</td><td>${esc(game.predicted_winner)} ${pct(game.predicted_probability)}</td><td>${esc(game.enhanced_v05_predicted_winner || '—')} ${game.enhanced_v05_predicted_probability == null ? '' : pct(game.enhanced_v05_predicted_probability)}</td><td>${esc(game.baseline_predicted_winner || '—')} ${game.baseline_predicted_probability == null ? '' : pct(game.baseline_predicted_probability)}</td><td class="${game.correct ? 'positive' : 'negative'}">${game.correct ? 'Correct' : 'Wrong'}</td></tr>`).join('');
     byId('historical-games').innerHTML = rows
-      ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Result</th><th>v0.9</th><th>v0.5</th><th>v0.4</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      ? `<div class="table-wrap"><table><thead><tr><th>Date</th><th>Result</th><th>v0.12</th><th>v0.5</th><th>v0.4</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table></div>`
       : '<div class="notice">Not enough completed games after the selected warmup.</div>';
     const trainingText = (data.training_seasons || []).length ? ` · fit on ${data.training_seasons.join(' + ')}` : '';
     const calibrationText = (data.calibration_seasons || []).length ? ` · calibrated on ${data.calibration_seasons.join(' + ')}` : '';
@@ -675,6 +786,8 @@
       byId('baseline-metrics').innerHTML = '';
       byId('model-change').innerHTML = '';
       byId('ablation-table').innerHTML = '';
+      byId('tournament-decision').innerHTML = '';
+      byId('tournament-table').innerHTML = '';
       byId('coefficient-table').innerHTML = '';
       byId('feature-diagnostics').innerHTML = '';
       byId('calibration-comparison').innerHTML = '';
@@ -695,6 +808,161 @@
     link.download = `moneyball-paper-bets-${new Date().toISOString().slice(0, 10)}.json`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+
+  function propPaperStake(prop) {
+    const account = loadAccount();
+    if (!prop || prop.signal !== 'BET' || !prop.recommended_side) return 0;
+    const quote = prop.recommended_side === 'YES' ? prop.yes : prop.no;
+    const probability = Number(quote.model_probability);
+    const price = Number(quote.executable_price);
+    if (!quote.fully_fillable || !Number.isFinite(probability) || !Number.isFinite(price) || price <= 0 || price >= 1) return 0;
+    const fullKelly = Math.max(0, (probability - price) / (1 - price));
+    const quarterKellyStake = account.cash * 0.25 * fullKelly;
+    return Math.min(quarterKellyStake, account.cash * 0.01, account.cash);
+  }
+
+  function placePropPaperBet(marketId) {
+    if (!latestPropsData) return;
+    const prop = latestPropsData.props.find(item => String(item.market_id) === String(marketId));
+    if (!prop || prop.signal !== 'BET' || !prop.recommended_side) return;
+    const start = new Date(prop.start_time);
+    if (Number.isNaN(start.valueOf()) || start <= new Date()) {
+      alert('Paper betting is closed because this game has already started.');
+      return;
+    }
+    if (paperBetForProp(prop.market_id)) {
+      alert('A paper bet has already been placed on this prop market.');
+      return;
+    }
+    const quote = prop.recommended_side === 'YES' ? prop.yes : prop.no;
+    const price = Number(quote.executable_price);
+    const probability = Number(quote.model_probability);
+    const edge = Number(quote.edge);
+    const expectedRoi = Number(quote.expected_roi);
+    const stake = propPaperStake(prop);
+    if (!quote.fully_fillable || !Number.isFinite(price) || stake < 0.01) {
+      alert('This prop does not have a valid Kelly-sized paper stake at the current executable price.');
+      return;
+    }
+    const account = loadAccount();
+    const shares = stake / price;
+    account.cash -= stake;
+    account.bets.push({
+      id: `prop-${prop.market_id}-${Date.now()}`,
+      betType: 'strikeout_prop',
+      gamePk: prop.game_pk,
+      marketId: prop.market_id,
+      title: `${prop.player_name} vs ${prop.opponent}`,
+      playerId: prop.player_id,
+      playerName: prop.player_name,
+      opponent: prop.opponent,
+      threshold: prop.threshold,
+      side: prop.recommended_side,
+      team: `${prop.player_name} ${prop.recommended_side}`,
+      stake,
+      price,
+      shares,
+      startTime: prop.start_time,
+      placedAt: new Date().toISOString(),
+      status: 'open',
+      modelProbability: probability,
+      edge,
+      expectedRoi,
+      projectedInnings: prop.projected_innings,
+      expectedStrikeouts: prop.expected_strikeouts,
+      matchupKRate: prop.matchup_k_rate,
+      lineupStatus: prop.lineup_status,
+      modelVersion: prop.model_version,
+      polymarketUrl: prop.polymarket_url,
+    });
+    saveAccount(account);
+    renderAccount();
+    renderProps(latestPropsData);
+  }
+
+  function propPaperAction(prop) {
+    const existing = paperBetForProp(prop.market_id);
+    if (existing) {
+      return `<div class="prop-action"><span class="signal-chip BETTED">BETTED · ${esc(existing.side)}</span><div class="bet-placed">${paperBetSummary(existing)}</div></div>`;
+    }
+    const start = new Date(prop.start_time);
+    if (Number.isNaN(start.valueOf()) || start <= new Date()) {
+      return `<div class="prop-action"><span class="signal-chip PASS">CLOSED</span><div class="prop-meta">Game already started</div></div>`;
+    }
+    const stake = propPaperStake(prop);
+    if (prop.signal === 'BET' && stake >= 0.01) {
+      return `<div class="prop-action"><span class="signal-chip BET">BET · ${esc(prop.recommended_side)}</span><button type="button" onclick="placePropPaperBet('${esc(prop.market_id)}')">Paper bet $${stake.toFixed(2)}</button></div>`;
+    }
+    return `<div class="prop-action"><span class="signal-chip ${esc(prop.signal)}">${esc(prop.signal)}${prop.recommended_side ? ` · ${esc(prop.recommended_side)}` : ''}</span><div class="prop-meta">${prop.signal === 'LEAN' ? 'Positive edge below thresholds' : 'No qualifying paper bet'}</div></div>`;
+  }
+
+  function propSideBox(quote, recommended) {
+    const price = quote.executable_price == null ? '—' : cents(quote.executable_price);
+    const edge = quote.edge == null ? '—' : pct(quote.edge);
+    const roi = quote.expected_roi == null ? '—' : pct(quote.expected_roi);
+    return `<div class="prop-side ${recommended === quote.side ? 'selected' : ''}"><strong>${esc(quote.side)}</strong><div class="prop-meta">VWAP ${price}<br>Model ${pct(quote.model_probability)} · Edge ${edge}<br>ROI ${roi} · ${quote.fully_fillable ? 'fillable' : 'partial/no fill'}</div></div>`;
+  }
+
+  function renderProps(data) {
+    latestPropsData = data;
+    const bets = data.props.filter(prop => prop.signal === 'BET').length;
+    const leans = data.props.filter(prop => prop.signal === 'LEAN').length;
+    const alreadyBet = data.props.filter(prop => paperBetForProp(prop.market_id)).length;
+    byId('props-status').textContent = `${data.props.length} upcoming priced strikeout markets · ${bets} BET · ${leans} LEAN · ${alreadyBet} already paper-bet · ${data.model_version} · $${Number(data.stake_dollars).toFixed(0)} order-book quote size.`;
+    byId('props-summary').innerHTML = `
+      <div class="summary-card"><span>Markets</span><div class="metric-word">Upcoming</div><strong>${data.props.length}</strong></div>
+      <div class="summary-card"><span>BET</span><div class="metric-word">Executable</div><strong class="positive">${bets}</strong></div>
+      <div class="summary-card"><span>Paper bets</span><div class="metric-word">Already placed</div><strong>${alreadyBet}</strong></div>
+      <div class="summary-card"><span>Mapped</span><div class="metric-word">MLB IDs</div><strong>${data.diagnostics.mapped_players || 0}</strong></div>`;
+    const rows = data.props.map(prop => `<tr>
+      <td><span class="player-identity"><img class="player-headshot" src="${playerHeadshotUrl(prop.player_id)}" alt="" loading="lazy" onerror="this.style.display='none'"><span><strong>${esc(prop.player_name)}</strong><br><span class="muted">vs ${esc(prop.opponent)} · ${safeDate(prop.start_time)}</span></span></span></td>
+      <td class="quant-number">${prop.threshold}+ K</td>
+      <td class="quant-number">${Number(prop.projected_innings).toFixed(1)}</td>
+      <td class="quant-number">${Number(prop.expected_strikeouts).toFixed(2)}</td>
+      <td class="quant-number">${pct(prop.matchup_k_rate)}</td>
+      <td><div class="prop-side-grid">${propSideBox(prop.yes, prop.recommended_side)}${propSideBox(prop.no, prop.recommended_side)}</div></td>
+      <td>${propPaperAction(prop)}<div class="prop-meta" style="margin-top:6px">Lineup ${esc(prop.lineup_status)} · ${prop.hitters_used}/9 hitters</div></td>
+      <td><a class="button secondary" href="${esc(prop.polymarket_url)}" target="_blank" rel="noreferrer">Market</a></td>
+    </tr>`).join('');
+    byId('props-table').innerHTML = rows
+      ? `<div class="table-wrap"><table><thead><tr><th>Pitcher</th><th>Prop</th><th>Proj IP</th><th>Proj K</th><th>Matchup K%</th><th>Executable YES / NO</th><th>Signal / Paper</th><th>Link</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : '<div class="notice">No upcoming pregame Polymarket pitcher-strikeout props could be mapped and priced in the selected window. Live and completed games are intentionally excluded from paper betting.</div>';
+  }
+
+  async function loadProps() {
+    const button = byId('refresh-props');
+    button.disabled = true;
+    byId('props-status').textContent = 'Discovering player props, resolving MLB IDs, and walking both order books…';
+    try {
+      const query = new URLSearchParams({ stake_dollars: String(Number(byId('prop-stake').value || 50)), days: String(Number(byId('days').value || 3)) });
+      const response = await fetch(`/api/v1/props/strikeouts?${query}`);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || JSON.stringify(data));
+      renderProps(data);
+    } catch (error) {
+      byId('props-status').innerHTML = `<span class="negative">${esc(error.message)}</span>`;
+      byId('props-summary').innerHTML = '';
+      byId('props-table').innerHTML = '';
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function openReleaseNotes() {
+    const content = byId('release-notes-content');
+    content.innerHTML = '<div class="muted">Loading release notes…</div>';
+    try {
+      const response = await fetch('/static/changelog.json', { cache: 'no-store' });
+      if (!response.ok) throw new Error(`Changelog HTTP ${response.status}`);
+      const releases = await response.json();
+      content.innerHTML = releases.map(release => `<article class="release-entry"><h3>${esc(release.version)}</h3><div class="release-date">${esc(release.date)}</div><ul>${(release.changes || []).map(change => `<li>${esc(change)}</li>`).join('')}</ul></article>`).join('');
+      byId('release-notes-modal').showModal();
+    } catch (error) {
+      content.innerHTML = `<div class="error">${esc(error.message)}</div>`;
+      byId('release-notes-modal').showModal();
+    }
   }
 
   async function refresh() {
@@ -730,11 +998,14 @@
   }
 
   byId('refresh').addEventListener('click', refresh);
+  byId('refresh-props').addEventListener('click', loadProps);
+  byId('release-notes-button').addEventListener('click', openReleaseNotes);
+  byId('close-release-notes').addEventListener('click', () => byId('release-notes-modal').close());
   byId('run-backtest').addEventListener('click', loadBacktest);
   byId('run-edge-performance').addEventListener('click', loadEdgePerformance);
   byId('export-paper').addEventListener('click', exportPaperAccount);
   byId('kelly').addEventListener('change', refresh);
-  byId('days').addEventListener('change', refresh);
+  byId('days').addEventListener('change', () => { refresh(); loadProps(); });
   byId('bet-strategy').addEventListener('change', () => { if (latestData) { renderTopPick(latestData); byId('games').innerHTML = renderMarkets(latestData.games); } });
   byId('edge-horizon').addEventListener('change', loadEdgePerformance);
   byId('reset-paper').addEventListener('click', () => {
@@ -747,6 +1018,7 @@
   byId('backtest-season').value = String(new Date().getFullYear());
   renderAccount();
   refresh();
+  loadProps();
   loadEdgePerformance();
   loadBacktest();
   setInterval(refresh, 60000);

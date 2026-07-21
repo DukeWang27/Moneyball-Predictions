@@ -3,7 +3,7 @@ from datetime import date, timedelta
 import pytest
 
 from moneyball_predictions.backtest import evaluate_walk_forward_games
-from moneyball_predictions.mlb import MlbGameState, MlbPitchingLine
+from moneyball_predictions.mlb import MlbBattingLine, MlbGameState, MlbPitchingLine
 from moneyball_predictions.optimized import (
     FeatureRow,
     RegularizedLogisticModel,
@@ -44,6 +44,14 @@ def _game(
         home_probable_pitcher_id=100 + ord(home),
         away_first5_runs=min(away_score, 5),
         home_first5_runs=min(home_score, 5),
+        away_batting=MlbBattingLine(
+            at_bats=34, hits=8, doubles=2, triples=0, home_runs=1,
+            walks=3, intentional_walks=0, hit_by_pitch=1,
+        ),
+        home_batting=MlbBattingLine(
+            at_bats=33, hits=9, doubles=2, triples=0, home_runs=2,
+            walks=4, intentional_walks=0, hit_by_pitch=0,
+        ),
         away_pitching=(
             MlbPitchingLine(
                 pitcher_id=100 + ord(away),
@@ -170,12 +178,12 @@ def test_backtest_exposes_v07_and_ablations() -> None:
         training_games_by_season=training,
     )
 
-    assert result.optimized.label.startswith("v0.9.1 ")
+    assert result.optimized.label.startswith("v0.12 ")
     assert result.enhanced.label == "Enhanced v0.5"
     assert result.training_seasons == [2024]
     assert result.calibration_seasons == [2025]
     assert result.optimized_training_games > 0
-    assert len(result.ablations) == 8
+    assert len(result.ablations) == 9
     assert result.target_starter_coverage > 0
     assert result.target_component_coverage > 0
     assert result.target_bullpen_coverage > 0
@@ -183,6 +191,8 @@ def test_backtest_exposes_v07_and_ablations() -> None:
     assert result.optimized_variant
     assert result.feature_diagnostics
     assert result.calibration_comparison
+    assert result.tournament_models
+    assert result.tournament_champion
 
 
 def test_prepare_model_uses_pre_target_seasons_only() -> None:
@@ -207,6 +217,7 @@ def test_prepare_model_uses_pre_target_seasons_only() -> None:
         "Park",
         "StarterSplit",
         "ParkNeutralSplit",
+        "BaseRunsStarter",
     }
 
 

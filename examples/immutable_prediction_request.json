@@ -1,0 +1,25 @@
+{
+  "game_id": 123456,
+  "horizon": "T1H",
+  "as_of": "2026-07-20T22:00:00Z",
+  "model_version": "v0.12 manual test",
+  "feature_schema_version": "v0.12.1",
+  "code_commit_sha": "local",
+  "model_artifact_sha256": "manual-test",
+  "features": {
+    "Base": 0.18,
+    "StarterKRate": 0.02,
+    "StarterBBRate": -0.01,
+    "BaseRuns": 0.12
+  },
+  "source_snapshot": {
+    "source": "manual test"
+  },
+  "raw_home_probability": 0.57,
+  "calibrated_home_probability": 0.55,
+  "home_team": "Home Team",
+  "away_team": "Away Team",
+  "probable_home_pitcher_id": 1,
+  "probable_away_pitcher_id": 2,
+  "lineups_confirmed": true
+}

@@ -24,7 +24,8 @@ from typing import Iterable
 import numpy as np
 from sklearn.isotonic import IsotonicRegression
 
-from .mlb import MlbGameState, MlbPitchingLine
+from .mlb import MlbBattingLine, MlbGameState, MlbPitchingLine
+from .sabermetrics import BattingLine, base_runs_smyth_v1, pythagenpat_win_pct
 from .model import (
     add_home_field_advantage,
     clip_probability,
@@ -60,6 +61,7 @@ FEATURE_NAMES = (
     "StarterKRate",
     "StarterBBRate",
     "StarterHRRate",
+    "BaseRuns",
 )
 FEATURE_VARIANTS: dict[str, tuple[int, ...]] = {
     "v07": (0, 1, 2),
@@ -68,6 +70,7 @@ FEATURE_VARIANTS: dict[str, tuple[int, ...]] = {
     "Park": (0, 3, 8, 9),
     "StarterSplit": (0, 11, 12, 13),
     "ParkNeutralSplit": (10, 11, 12, 13, 8, 9),
+    "BaseRunsStarter": (14, 11, 12, 13, 8, 9),
     "BullpenQuality": (10, 11, 12, 13, 8, 9, 5),
     "Full": (10, 11, 12, 13, 8, 9, 5, 6),
 }
@@ -77,6 +80,7 @@ LIVE_CHAMPION_CANDIDATES = (
     "Park",
     "StarterSplit",
     "ParkNeutralSplit",
+    "BaseRunsStarter",
 )
 
 
@@ -122,6 +126,44 @@ class TeamSeasonState:
         self.runs_scored += scored
         self.runs_allowed += allowed
         self.games_played += 1
+
+
+@dataclass
+class BaseRunsComponentState:
+    at_bats: float = 0.0
+    hits: float = 0.0
+    doubles: float = 0.0
+    triples: float = 0.0
+    home_runs: float = 0.0
+    walks: float = 0.0
+    intentional_walks: float = 0.0
+    hit_by_pitch: float = 0.0
+    games: int = 0
+
+    def update(self, line: MlbBattingLine) -> None:
+        self.at_bats += line.at_bats
+        self.hits += line.hits
+        self.doubles += line.doubles
+        self.triples += line.triples
+        self.home_runs += line.home_runs
+        self.walks += line.walks
+        self.intentional_walks += line.intentional_walks
+        self.hit_by_pitch += line.hit_by_pitch
+        self.games += 1
+
+    def estimated_runs(self) -> float:
+        return base_runs_smyth_v1(
+            BattingLine(
+                at_bats=self.at_bats,
+                hits=self.hits,
+                doubles=self.doubles,
+                triples=self.triples,
+                home_runs=self.home_runs,
+                walks=self.walks,
+                intentional_walks=self.intentional_walks,
+                hit_by_pitch=self.hit_by_pitch,
+            )
+        )
 
 
 @dataclass
@@ -199,6 +241,8 @@ class SeasonSummary:
     league_first5_runs_per_team_game: float
     league_late_runs_per_team_game: float
     home_win_rate: float
+    base_runs_teams: dict[str, TeamPrior] = field(default_factory=dict)
+    league_base_runs_per_team_game: float = DEFAULT_LEAGUE_RUNS
     pitcher_components: dict[str, PitcherComponentPrior] = field(default_factory=dict)
     team_relievers: dict[str, tuple[str, ...]] = field(default_factory=dict)
     park_run_factors: dict[str, float] = field(default_factory=dict)
@@ -395,6 +439,8 @@ class SeasonFeatureEngine:
         self.states: dict[str, TeamSeasonState] = {}
         self.park_adjusted_states: dict[str, TeamSeasonState] = {}
         self.pitchers: dict[str, PitcherStartState] = {}
+        self.base_runs_offense: dict[str, BaseRunsComponentState] = {}
+        self.base_runs_allowed: dict[str, BaseRunsComponentState] = {}
         self.bullpens: dict[str, BullpenState] = {}
         self.components: dict[str, PitcherComponentState] = {}
         self.team_relievers: dict[str, set[str]] = {
@@ -414,6 +460,12 @@ class SeasonFeatureEngine:
 
     def _park_state(self, team: str) -> TeamSeasonState:
         return self.park_adjusted_states.setdefault(team, TeamSeasonState())
+
+    def _base_runs_offense_state(self, team: str) -> BaseRunsComponentState:
+        return self.base_runs_offense.setdefault(team, BaseRunsComponentState())
+
+    def _base_runs_allowed_state(self, team: str) -> BaseRunsComponentState:
+        return self.base_runs_allowed.setdefault(team, BaseRunsComponentState())
 
     def _bullpen(self, team: str) -> BullpenState:
         return self.bullpens.setdefault(team, BullpenState())
@@ -498,6 +550,36 @@ class SeasonFeatureEngine:
             league_runs_per_team_game=league_rate,
             pseudo_games=PRIOR_PSEUDO_GAMES,
         )
+        return clip_probability(
+            add_home_field_advantage(
+                log5_probability(home_strength, away_strength),
+                self.prior_summary.home_win_rate,
+            ),
+            0.10,
+            0.90,
+        )
+
+    def _base_runs_home_probability(self, away_team: str, home_team: str) -> float:
+        league = self.prior_summary.league_base_runs_per_team_game
+
+        def team_strength(team: str) -> float:
+            offense = self._base_runs_offense_state(team)
+            allowed = self._base_runs_allowed_state(team)
+            prior = self.prior_summary.base_runs_teams.get(
+                team, TeamPrior(league, league)
+            )
+            scored_rate = (
+                offense.estimated_runs()
+                + prior.runs_scored_per_game * PRIOR_PSEUDO_GAMES
+            ) / (offense.games + PRIOR_PSEUDO_GAMES)
+            allowed_rate = (
+                allowed.estimated_runs()
+                + prior.runs_allowed_per_game * PRIOR_PSEUDO_GAMES
+            ) / (allowed.games + PRIOR_PSEUDO_GAMES)
+            return pythagenpat_win_pct(scored_rate, allowed_rate, 1.0)
+
+        away_strength = team_strength(away_team)
+        home_strength = team_strength(home_team)
         return clip_probability(
             add_home_field_advantage(
                 log5_probability(home_strength, away_strength),
@@ -685,6 +767,7 @@ class SeasonFeatureEngine:
         starter_k_rate = home_k - away_k
         starter_bb_rate = away_bb - home_bb
         starter_hr_rate = away_hr - home_hr
+        base_runs_home = self._base_runs_home_probability(away_team, home_team)
         return (
             logit(base_home),
             proxy_starter,
@@ -700,6 +783,7 @@ class SeasonFeatureEngine:
             starter_k_rate,
             starter_bb_rate,
             starter_hr_rate,
+            logit(base_runs_home),
         )
 
     def starter_covered(self, game: MlbGameState) -> bool:
@@ -750,6 +834,13 @@ class SeasonFeatureEngine:
             allowed=game.away_score / park_factor,
         )
 
+        if game.away_batting is not None:
+            self._base_runs_offense_state(game.away_team).update(game.away_batting)
+            self._base_runs_allowed_state(game.home_team).update(game.away_batting)
+        if game.home_batting is not None:
+            self._base_runs_offense_state(game.home_team).update(game.home_batting)
+            self._base_runs_allowed_state(game.away_team).update(game.home_batting)
+
         if game.away_first5_runs is not None and game.home_first5_runs is not None:
             away_pitcher = _pitcher_key(game.away_probable_pitcher_id, game.away_probable_pitcher)
             home_pitcher = _pitcher_key(game.home_probable_pitcher_id, game.home_probable_pitcher)
@@ -790,6 +881,21 @@ class SeasonFeatureEngine:
                 )
                 total_runs += state.runs_scored
                 team_games += state.games_played
+        base_runs_teams: dict[str, TeamPrior] = {}
+        total_base_runs = 0.0
+        base_runs_games = 0
+        for team in set(self.base_runs_offense) | set(self.base_runs_allowed):
+            offense = self.base_runs_offense.get(team, BaseRunsComponentState())
+            allowed = self.base_runs_allowed.get(team, BaseRunsComponentState())
+            games = min(offense.games, allowed.games)
+            if games <= 0:
+                continue
+            scored_rate = offense.estimated_runs() / games
+            allowed_rate = allowed.estimated_runs() / games
+            base_runs_teams[team] = TeamPrior(scored_rate, allowed_rate)
+            total_base_runs += offense.estimated_runs()
+            base_runs_games += games
+
         pitcher_rates = {
             key: state.first5_runs_allowed / state.starts
             for key, state in self.pitchers.items()
@@ -857,6 +963,11 @@ class SeasonFeatureEngine:
                 total_late / bullpen_games if bullpen_games else DEFAULT_LATE_RUNS
             ),
             home_win_rate=min(max(home_rate, 0.50), 0.58),
+            base_runs_teams=base_runs_teams,
+            league_base_runs_per_team_game=(
+                total_base_runs / base_runs_games
+                if base_runs_games else DEFAULT_LEAGUE_RUNS
+            ),
             pitcher_components=component_priors,
             team_relievers={team: tuple(sorted(keys)) for team, keys in self.team_relievers.items()},
             park_run_factors=park_factors,

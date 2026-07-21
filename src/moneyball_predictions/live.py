@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sqlite3
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
@@ -11,6 +13,8 @@ from zoneinfo import ZoneInfo
 import httpx
 
 from .market_archive import append_market_snapshots
+from .reproducibility import sha256_json
+from .storage import insert_prediction
 from .mlb import (
     MlbDataError,
     MlbGameState,
@@ -28,10 +32,8 @@ from .model import (
 )
 from .odds import prediction_market_expected_value, prediction_market_kelly_stake
 from .optimized import (
-    OptimizedModelArtifact,
     SeasonFeatureEngine,
     build_target_rows,
-    prepare_optimized_model_multifold,
 )
 from .polymarket import (
     MarketDiagnostic,
@@ -48,6 +50,11 @@ from .schemas import (
     RecommendedBet,
     ScoreboardGame,
 )
+from .tournament import (
+    CalibratedPredictor,
+    ModelTournamentArtifact,
+    prepare_model_tournament_multifold,
+)
 
 EASTERN = ZoneInfo("America/New_York")
 MIN_BET_EDGE = 0.05
@@ -59,7 +66,7 @@ MIN_COMPONENT_COVERAGE = 0.70
 
 @dataclass
 class LiveOptimizedContext:
-    artifact: OptimizedModelArtifact
+    artifact: ModelTournamentArtifact
     engine: SeasonFeatureEngine
     built_at: datetime
 
@@ -326,6 +333,8 @@ def _scoreboard_row(
         official_date=game.official_date,
         away_team=game.away_team,
         home_team=game.home_team,
+        away_team_id=game.away_team_id,
+        home_team_id=game.home_team_id,
         away_score=game.away_score,
         home_score=game.home_score,
         abstract_state=game.abstract_state,
@@ -397,7 +406,7 @@ async def _live_optimized_context(
         _fetch_regular_year(client, season, through),
     )
     historical = dict(historical_pairs)
-    artifact, prior_summary, prior_elo = prepare_optimized_model_multifold(
+    preparation = prepare_model_tournament_multifold(
         earlier_seed_games=historical[season - 4],
         earlier_training_games=historical[season - 3],
         earlier_validation_games=historical[season - 2],
@@ -407,6 +416,9 @@ async def _live_optimized_context(
         min_games=min_games,
         fold_years=(season - 2, season - 1),
     )
+    artifact = preparation.artifact
+    prior_summary = preparation.prior_summary
+    prior_elo = preparation.prior_elo
     _, engine = build_target_rows(
         games=current_pair[1],
         prior_summary=prior_summary,
@@ -418,20 +430,100 @@ async def _live_optimized_context(
     return context
 
 
+def _archive_immutable_horizon_prediction(
+    *,
+    now: datetime,
+    game: MlbGameState,
+    model_version: str,
+    features: tuple[float, ...] | None,
+    raw_home_probability: float,
+    calibrated_home_probability: float,
+    artifact: ModelTournamentArtifact | None,
+    team_strengths: tuple[float, float],
+) -> None:
+    """Best-effort freeze at T-24h or T-1h; never break the dashboard."""
+    game_time = _parse_start_time(game.game_date)
+    if game_time is None:
+        return
+    minutes = (game_time - now).total_seconds() / 60.0
+    both_lineups = len(game.away_lineup_ids) == 9 and len(game.home_lineup_ids) == 9
+    if 45.0 <= minutes <= 75.0 and both_lineups:
+        horizon = "T1H"
+        frozen_as_of = game_time - timedelta(hours=1)
+    elif 1380.0 <= minutes <= 1500.0 and not both_lineups:
+        horizon = "T24H"
+        frozen_as_of = game_time - timedelta(hours=24)
+    else:
+        return
+
+    feature_names = (
+        "Base", "ProxyStarter", "ProxyBullpen", "StarterComponent",
+        "ExpectedInnings", "BullpenComponent", "BullpenFatigue",
+        "StarterComponentLoose", "StarterWorkload", "ParkInteraction",
+        "ParkNeutralBase", "StarterKRate", "StarterBBRate", "StarterHRRate",
+        "BaseRuns",
+    )
+    feature_payload = (
+        dict(zip(feature_names, features, strict=True))
+        if features is not None
+        else {
+            "fallback_team_a_strength": team_strengths[0],
+            "fallback_team_b_strength": team_strengths[1],
+        }
+    )
+    artifact_payload = {
+        "champion_key": artifact.champion_key if artifact else "fallback",
+        "selection_folds": list(artifact.selection_folds) if artifact else [],
+        "model_version": model_version,
+    }
+    source_snapshot = {
+        "game_pk": game.game_pk,
+        "game_start": game.game_date,
+        "away_team": game.away_team,
+        "home_team": game.home_team,
+        "away_pitcher_id": game.away_probable_pitcher_id,
+        "home_pitcher_id": game.home_probable_pitcher_id,
+        "away_lineup_ids": list(game.away_lineup_ids),
+        "home_lineup_ids": list(game.home_lineup_ids),
+    }
+    try:
+        insert_prediction(
+            game_id=game.game_pk,
+            horizon=horizon,
+            as_of=frozen_as_of,
+            model_version=model_version,
+            feature_schema_version="v0.12.1",
+            code_commit_sha=os.environ.get("MONEYBALL_CODE_COMMIT", "unknown"),
+            model_artifact_sha256=sha256_json(artifact_payload),
+            calibration_artifact_sha256=None,
+            features=feature_payload,
+            source_snapshot=source_snapshot,
+            raw_home_probability=raw_home_probability,
+            calibrated_home_probability=calibrated_home_probability,
+            home_team=game.home_team,
+            away_team=game.away_team,
+            probable_home_pitcher_id=game.home_probable_pitcher_id,
+            probable_away_pitcher_id=game.away_probable_pitcher_id,
+            lineups_confirmed=both_lineups,
+        )
+    except (OSError, sqlite3.Error, TypeError, ValueError):
+        return
+
+
 async def build_live_mlb_predictions(
     bankroll: float = 100.0,
     kelly_multiplier: float = 0.25,
     season: int | None = None,
     days: int = 2,
 ) -> LiveMlbResponse:
-    """Fetch MLB scores and price upcoming games with v0.9 or its explicit v0.7 fallback."""
+    """Fetch MLB scores and price upcoming games with the v0.12 tournament or its explicit v0.7 fallback."""
     now = datetime.now(UTC)
     now_eastern = now.astimezone(EASTERN)
     resolved_season = season or now_eastern.year
     start_date = now_eastern.date()
     end_date = start_date + timedelta(days=max(days, 1) - 1)
     timeout = httpx.Timeout(90.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.9.1 research-dashboard"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.12.1 institutional-dashboard"}
     runtime_counts: Counter[str] = Counter()
     optimized_context: LiveOptimizedContext | None = None
 
@@ -576,6 +668,11 @@ async def build_live_mlb_predictions(
             fallback_probability_a = 1.0 - fallback_home_b
 
         probability_a = fallback_probability_a
+        raw_home_probability = (
+            fallback_probability_a
+            if market.team_a == official_game.home_team
+            else 1.0 - fallback_probability_a
+        )
         model_version = "v0.5 fallback"
         matchup_features: tuple[float, ...] | None = None
         if optimized_context:
@@ -591,23 +688,49 @@ async def build_live_mlb_predictions(
                     home_pitcher_name=official_game.home_probable_pitcher,
                     venue=official_game.venue,
                 )
-                component_ready = (
-                    optimized_context.artifact.training_component_coverage >= MIN_COMPONENT_COVERAGE
-                    and optimized_context.artifact.validation_component_coverage >= MIN_COMPONENT_COVERAGE
+                linear_artifact = optimized_context.artifact.linear_artifact
+                component_ready = bool(
+                    linear_artifact
+                    and linear_artifact.training_component_coverage >= MIN_COMPONENT_COVERAGE
+                    and linear_artifact.validation_component_coverage >= MIN_COMPONENT_COVERAGE
                 )
-                variant = (
-                    optimized_context.artifact.champion
-                    if component_ready
-                    else optimized_context.artifact.variants["v07"]
-                )
-                home_probability = variant.predict(matchup_features)
+                if component_ready:
+                    candidate = optimized_context.artifact.champion
+                    if isinstance(candidate.predictor, CalibratedPredictor):
+                        raw_home_probability = candidate.predictor.raw_predictor.predict(
+                            matchup_features
+                        )
+                    else:
+                        raw_home_probability = candidate.predict(matchup_features)
+                    home_probability = candidate.predict(matchup_features)
+                    selected_label = candidate.label
+                    selected_calibration = candidate.calibration_method
+                else:
+                    variant = (
+                        linear_artifact.variants["v07"]
+                        if linear_artifact is not None
+                        else None
+                    )
+                    fallback_home_probability = (
+                        fallback_probability_a
+                        if market.team_a == official_game.home_team
+                        else 1.0 - fallback_probability_a
+                    )
+                    home_probability = (
+                        variant.predict(matchup_features)
+                        if variant is not None
+                        else fallback_home_probability
+                    )
+                    raw_home_probability = home_probability
+                    selected_label = "v0.7 proxy"
+                    selected_calibration = "pitching sync required"
                 probability_a = (
                     home_probability
                     if market.team_a == official_game.home_team
                     else 1.0 - home_probability
                 )
                 model_version = (
-                    f"v0.9.1 {variant.label} ({variant.calibration_method})"
+                    f"v0.12 {selected_label} ({selected_calibration})"
                     if component_ready
                     else "v0.7 proxy · run pitching sync"
                 )
@@ -670,6 +793,8 @@ async def build_live_mlb_predictions(
             polymarket_url=market.polymarket_url,
             away_team=official_game.away_team,
             home_team=official_game.home_team,
+            away_team_id=official_game.away_team_id,
+            home_team_id=official_game.home_team_id,
             away_probable_pitcher=official_game.away_probable_pitcher,
             home_probable_pitcher=official_game.home_probable_pitcher,
             venue=official_game.venue,
@@ -688,6 +813,20 @@ async def build_live_mlb_predictions(
             volume=market.volume,
             model_version=model_version,
         )
+        _archive_immutable_horizon_prediction(
+            now=now,
+            game=official_game,
+            model_version=model_version,
+            features=matchup_features,
+            raw_home_probability=raw_home_probability,
+            calibrated_home_probability=(
+                probability_a
+                if market.team_a == official_game.home_team
+                else 1.0 - probability_a
+            ),
+            artifact=optimized_context.artifact if optimized_context else None,
+            team_strengths=(strength_a, strength_b),
+        )
         games.append(prediction)
         archive_rows.append(
             {
@@ -702,9 +841,13 @@ async def build_live_mlb_predictions(
                 "best_bid_a": book_a.best_bid if book_a else None,
                 "best_ask_a": ask_a,
                 "ask_size_a": book_a.ask_size if book_a else None,
+                "bids_a": ([{"price": p, "size": q} for p, q in book_a.bids] if book_a else []),
+                "asks_a": ([{"price": p, "size": q} for p, q in book_a.asks] if book_a else []),
                 "best_bid_b": book_b.best_bid if book_b else None,
                 "best_ask_b": ask_b,
                 "ask_size_b": book_b.ask_size if book_b else None,
+                "bids_b": ([{"price": p, "size": q} for p, q in book_b.bids] if book_b else []),
+                "asks_b": ([{"price": p, "size": q} for p, q in book_b.asks] if book_b else []),
                 "model_probability_a": probability_a,
                 "model_probability_b": probability_b,
                 "model_version": model_version,
@@ -726,6 +869,7 @@ async def build_live_mlb_predictions(
                         "ExpectedInnings", "BullpenComponent", "BullpenFatigue",
                         "StarterComponentLoose", "StarterWorkload", "ParkInteraction",
                         "ParkNeutralBase", "StarterKRate", "StarterBBRate", "StarterHRRate",
+                        "BaseRuns",
                     ), matchup_features, strict=True))
                     if matchup_features is not None else None
                 ),
@@ -791,9 +935,11 @@ async def build_live_mlb_predictions(
         season=resolved_season,
         model_version=(
             (
-                f"v0.9.1 {optimized_context.artifact.champion.label} "
+                f"v0.12 {optimized_context.artifact.champion.label} "
                 f"({optimized_context.artifact.champion.calibration_method})"
-                if optimized_context.artifact.validation_component_coverage >= MIN_COMPONENT_COVERAGE
+                if optimized_context.artifact.linear_artifact is not None
+                and optimized_context.artifact.linear_artifact.validation_component_coverage
+                >= MIN_COMPONENT_COVERAGE
                 else "v0.7 proxy · run pitching sync"
             )
             if optimized_context
@@ -816,7 +962,7 @@ async def build_live_mlb_predictions(
 async def build_single_scoreboard_game(game_pk: int) -> ScoreboardGame:
     """Fetch one game for resolving a locally stored paper bet."""
     timeout = httpx.Timeout(15.0, connect=8.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.9.1 paper-settlement"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.12.1 paper-settlement"}
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             game = await fetch_mlb_game(client, game_pk)

@@ -34,6 +34,8 @@ class OrderBookTop:
     best_ask: float | None
     ask_size: float | None
     last_trade_price: float | None
+    bids: tuple[tuple[float, float], ...] = ()
+    asks: tuple[tuple[float, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -524,11 +526,29 @@ async def fetch_order_book_tops(
             key=lambda order: _safe_float(order.get("price")) or 2,
             default=None,
         )
+        parsed_bids = tuple(
+            (price, size)
+            for order in bids
+            if (price := _safe_float(order.get("price"))) is not None
+            and (size := _safe_float(order.get("size"))) is not None
+            and 0 < price < 1
+            and size > 0
+        )
+        parsed_asks = tuple(
+            (price, size)
+            for order in asks
+            if (price := _safe_float(order.get("price"))) is not None
+            and (size := _safe_float(order.get("size"))) is not None
+            and 0 < price < 1
+            and size > 0
+        )
         result[token_id] = OrderBookTop(
             token_id=token_id,
             best_bid=_safe_float(best_bid_order.get("price")) if best_bid_order else None,
             best_ask=_safe_float(best_ask_order.get("price")) if best_ask_order else None,
             ask_size=_safe_float(best_ask_order.get("size")) if best_ask_order else None,
             last_trade_price=_safe_float(book.get("last_trade_price")),
+            bids=tuple(sorted(parsed_bids, key=lambda item: item[0], reverse=True)),
+            asks=tuple(sorted(parsed_asks, key=lambda item: item[0])),
         )
     return result
