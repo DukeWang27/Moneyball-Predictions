@@ -55,6 +55,9 @@ class FamilyDecision:
     best_market_id: str | None
     best_side: Side | None
     best_threshold: int | None
+    top_market_id: str | None
+    top_side: Side | None
+    top_threshold: int | None
     warning_code: str | None
     warning_message: str | None
 
@@ -253,6 +256,61 @@ def _quote_contract(
     )
 
 
+def _deduplicate_evaluations(
+    evaluations: list[ContractEvaluation],
+) -> list[ContractEvaluation]:
+    """Keep one executable market for each threshold/side pair.
+
+    Polymarket can expose duplicate or replacement markets for the same line.
+    For a buyer, prefer a fully fillable quote and then the lower executable
+    price. This prevents duplicate 4+/5+/6+ rows from entering the selector.
+    """
+
+    selected: dict[tuple[int, Side], ContractEvaluation] = {}
+
+    def quality(item: ContractEvaluation) -> tuple[int, int, float, int]:
+        has_price = item.executable_price is not None
+        price_score = -(item.executable_price or 1.0)
+        return (
+            int(item.fully_fillable),
+            int(has_price),
+            price_score,
+            -item.levels_consumed,
+        )
+
+    for item in evaluations:
+        key = (item.threshold, item.side)
+        current = selected.get(key)
+        if current is None or quality(item) > quality(current):
+            selected[key] = item
+
+    return sorted(selected.values(), key=lambda item: (item.threshold, item.side))
+
+
+def _top_display_contract(
+    evaluations: list[ContractEvaluation],
+) -> ContractEvaluation | None:
+    """Return the single most attractive visible option, even if blocked.
+
+    Safety gates still control whether it is actionable. This field exists so
+    the UI can show one decision per pitcher instead of every nested line.
+    """
+
+    priced = [item for item in evaluations if item.executable_price is not None]
+    if not priced:
+        return None
+    return max(
+        priced,
+        key=lambda item: (
+            int(item.fully_fillable),
+            item.expected_log_growth if item.expected_log_growth is not None else float("-inf"),
+            item.expected_roi if item.expected_roi is not None else float("-inf"),
+            item.edge if item.edge is not None else float("-inf"),
+            -item.threshold,
+        ),
+    )
+
+
 def choose_best_contract(
     contracts: list[MarketContract],
     *,
@@ -297,6 +355,9 @@ def choose_best_contract(
             )
         )
 
+    evaluations = _deduplicate_evaluations(evaluations)
+    top = _top_display_contract(evaluations)
+
     yes_prices = {
         evaluation.threshold: evaluation.executable_price
         for evaluation in evaluations
@@ -316,7 +377,17 @@ def choose_best_contract(
 
     if warning:
         evaluations = [replace(item, decision="WARNING") for item in evaluations]
-        return FamilyDecision(tuple(evaluations), None, None, None, warning, message)
+        return FamilyDecision(
+            tuple(evaluations),
+            None,
+            None,
+            None,
+            top.market_id if top else None,
+            top.side if top else None,
+            top.threshold if top else None,
+            warning,
+            message,
+        )
 
     eligible = [
         item
@@ -355,6 +426,9 @@ def choose_best_contract(
         best_market_id=best.market_id if best else None,
         best_side=best.side if best else None,
         best_threshold=best.threshold if best else None,
+        top_market_id=(best.market_id if best else (top.market_id if top else None)),
+        top_side=(best.side if best else (top.side if top else None)),
+        top_threshold=(best.threshold if best else (top.threshold if top else None)),
         warning_code=None,
         warning_message=None,
     )

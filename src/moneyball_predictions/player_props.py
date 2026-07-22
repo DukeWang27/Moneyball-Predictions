@@ -257,14 +257,9 @@ async def fetch_active_strikeout_markets(
 ) -> list[ParsedStrikeoutMarket]:
     """Discover active strikeout props without assuming one permanent type name."""
     parsed: dict[str, ParsedStrikeoutMarket] = {}
-    market_types = await _valid_strikeout_market_types(client)
-    parameter_sets: list[dict[str, Any]] = [
-        {"sports_market_types": market_type}
-        for market_type in market_types
-    ]
-    # Defensive fallback: scan active markets when metadata does not expose a strikeout type.
-    parameter_sets.append({})
-    for extra_params in parameter_sets:
+    market_types = sorted(set(await _valid_strikeout_market_types(client)))
+
+    async def scan(extra_params: dict[str, Any]) -> None:
         for page in range(max_pages):
             response = await client.get(
                 f"{GAMMA_BASE_URL}/markets",
@@ -288,8 +283,17 @@ async def fetch_active_strikeout_markets(
                     parsed[market.market_id] = market
             if len(payload) < page_size:
                 break
-        if parsed and extra_params:
-            break
+
+    # Scan every valid strikeout market type. The previous implementation
+    # stopped after the first type that returned data, which could omit
+    # alternate-threshold or replacement strikeout markets.
+    for market_type in market_types:
+        await scan({"sports_market_types": market_type})
+
+    # Defensive fallback only when sports metadata did not yield any markets.
+    if not parsed:
+        await scan({})
+
     return list(parsed.values())
 
 
@@ -644,6 +648,7 @@ async def build_strikeout_prop_board(
         "skipped_no_game": 0,
         "skipped_no_book": 0,
         "skipped_started": 0,
+        "unique_families": 0,
     }
     timeout = httpx.Timeout(45.0, connect=10.0)
     headers = {"User-Agent": "Moneyball-Predictions/0.13.0 prop-research"}
@@ -844,6 +849,9 @@ async def build_strikeout_prop_board(
                 best_market_id=decision.best_market_id,
                 best_side=decision.best_side,
                 best_threshold=decision.best_threshold,
+                top_market_id=decision.top_market_id,
+                top_side=decision.top_side,
+                top_threshold=decision.top_threshold,
                 contracts=[
                     PropContractEvaluation(**evaluation.__dict__)
                     for evaluation in decision.evaluations
@@ -885,6 +893,7 @@ async def build_strikeout_prop_board(
         ),
         reverse=True,
     )
+    diagnostics["unique_families"] = len(families)
     return PropBoardResponse(
         generated_at=now,
         season=resolved_season,

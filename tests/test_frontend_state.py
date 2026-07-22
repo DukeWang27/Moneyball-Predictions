@@ -29,9 +29,10 @@ def test_frontend_has_two_separate_postgres_ledgers() -> None:
 def test_frontend_groups_prop_families_and_has_one_best_bet_action() -> None:
     assert "Pitcher strikeout families" in HTML
     assert "familyCard" in JS
-    assert "contract.decision === 'BEST_BET'" in JS
+    assert "selectedPropContract" in JS
+    assert "family.best_market_id" in JS
     assert "prop-bet" in JS
-    assert "Shrunk p" in JS
+    assert "Shrunk probability" in JS
     assert "expected logarithmic growth" in HTML
     assert "https://securea.mlb.com/mlb/images/players/head_shot/" in JS
 
@@ -47,3 +48,9 @@ def test_frontend_can_import_legacy_browser_bets() -> None:
     assert "moneyballPaperAccountV1" in JS
     assert "/api/v1/paper/import-browser" in JS
     assert "Import bets" in JS
+
+
+def test_frontend_displays_only_one_prop_option_per_pitcher() -> None:
+    assert "family.contracts.map((contract) => contractRow" not in JS
+    assert "Selected from ${lineCount}" in JS
+    assert "propCoverageText" in JS

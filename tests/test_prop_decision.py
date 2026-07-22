@@ -69,3 +69,41 @@ def test_unconfirmed_lineup_disables_betting() -> None:
     )
     assert decision.warning_code == "LINEUP_NOT_CONFIRMED"
     assert decision.best_market_id is None
+
+
+def test_selector_exposes_one_top_option_when_lineup_blocks_betting() -> None:
+    decision = choose_best_contract(
+        [
+            contract(3, "YES", 0.45),
+            contract(3, "NO", 0.65),
+            contract(4, "YES", 0.30),
+            contract(4, "NO", 0.78),
+        ],
+        expected_strikeouts=4.0,
+        bankroll=100.0,
+        lineup_confirmed=False,
+    )
+    assert decision.best_market_id is None
+    assert decision.top_market_id is not None
+    assert decision.top_side in {"YES", "NO"}
+    assert decision.top_threshold in {3, 4}
+
+
+def test_duplicate_threshold_side_markets_are_deduplicated_to_best_buy_price() -> None:
+    contracts = [
+        MarketContract(
+            market_id="expensive", threshold=4, side="YES", token_id="a",
+            asks=((0.60, 100.0),), polymarket_url="https://example.com/a",
+        ),
+        MarketContract(
+            market_id="cheaper", threshold=4, side="YES", token_id="b",
+            asks=((0.45, 100.0),), polymarket_url="https://example.com/b",
+        ),
+        contract(4, "NO", 0.70),
+    ]
+    decision = choose_best_contract(
+        contracts, expected_strikeouts=4.0, bankroll=100.0, lineup_confirmed=True
+    )
+    yes_rows = [item for item in decision.evaluations if item.threshold == 4 and item.side == "YES"]
+    assert len(yes_rows) == 1
+    assert yes_rows[0].market_id == "cheaper"

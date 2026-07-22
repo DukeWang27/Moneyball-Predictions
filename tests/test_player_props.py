@@ -64,3 +64,47 @@ def test_strikeout_prop_settlement_yes_and_no() -> None:
     assert settle_strikeout_selection(strikeouts=6, threshold=7, side="YES") is False
     assert settle_strikeout_selection(strikeouts=6, threshold=7, side="NO") is True
     assert settle_strikeout_selection(strikeouts=7, threshold=7, side="NO") is False
+
+
+@pytest.mark.asyncio
+async def test_market_discovery_scans_every_valid_strikeout_type() -> None:
+    from moneyball_predictions.player_props import fetch_active_strikeout_markets
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self):
+            return self.payload
+
+    class Client:
+        def __init__(self) -> None:
+            self.scanned: list[str] = []
+
+        async def get(self, url: str, params=None):
+            if url.endswith("/sports/market-types"):
+                return Response(["pitcher_strikeouts", "pitcher_strikeouts_alt"])
+            market_type = (params or {}).get("sports_market_types")
+            self.scanned.append(market_type)
+            suffix = "main" if market_type == "pitcher_strikeouts" else "alt"
+            return Response(
+                [
+                    {
+                        "id": f"market-{suffix}",
+                        "question": f"Will Example Pitcher record {4 if suffix == 'main' else 5}+ strikeouts?",
+                        "slug": f"example-{suffix}",
+                        "sportsMarketType": market_type,
+                        "outcomes": '["Yes", "No"]',
+                        "clobTokenIds": f'["yes-{suffix}", "no-{suffix}"]',
+                    }
+                ]
+            )
+
+    client = Client()
+    markets = await fetch_active_strikeout_markets(client)
+
+    assert {market.market_id for market in markets} == {"market-main", "market-alt"}
+    assert client.scanned == ["pitcher_strikeouts", "pitcher_strikeouts_alt"]

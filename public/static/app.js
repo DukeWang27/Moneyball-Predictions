@@ -204,24 +204,67 @@ async function placeMoneyline(gamePk) {
   } catch (error) { toast(error.message); }
 }
 
-function contractRow(family, contract) {
-  const isBest = contract.decision === 'BEST_BET';
-  return `<tr>
-    <td class="mono">${contract.threshold}+ K</td>
-    <td><strong>${esc(contract.side)}</strong></td>
-    <td class="mono">${pct(contract.raw_probability)}</td>
-    <td class="mono">${pct(contract.conservative_probability)}</td>
-    <td class="mono">${cents(contract.executable_price)}</td>
-    <td class="mono ${Number(contract.edge) >= 0 ? 'positive' : 'negative'}">${pct(contract.edge)}</td>
-    <td class="mono">${pct(contract.expected_roi)}</td>
-    <td class="mono">${pct(contract.full_kelly_fraction)}</td>
-    <td><span class="decision ${esc(contract.decision)}">${esc(contract.decision.replace('_', ' '))}</span></td>
-    <td>${isBest ? `<button class="bet-button prop-bet" data-family="${esc(family.family_key)}" data-market="${esc(contract.market_id)}" data-side="${esc(contract.side)}">Paper bet ${dollars(contract.proposed_stake)}</button>` : `<a class="secondary" href="${esc(contract.polymarket_url)}" target="_blank" rel="noreferrer">View</a>`}</td>
-  </tr>`;
+function selectedPropContract(family) {
+  const exact = family.contracts.find((contract) =>
+    contract.market_id === (family.best_market_id || family.top_market_id) &&
+    contract.side === (family.best_side || family.top_side)
+  );
+  if (exact) return exact;
+
+  return [...family.contracts]
+    .filter((contract) => contract.executable_price !== null)
+    .sort((a, b) =>
+      Number(b.fully_fillable) - Number(a.fully_fillable) ||
+      Number(b.expected_log_growth ?? -Infinity) - Number(a.expected_log_growth ?? -Infinity) ||
+      Number(b.expected_roi ?? -Infinity) - Number(a.expected_roi ?? -Infinity) ||
+      Number(b.edge ?? -Infinity) - Number(a.edge ?? -Infinity)
+    )[0] || null;
+}
+
+function propDecisionLabel(family, contract) {
+  if (!contract) return { text: 'NO QUOTE', className: 'PASS' };
+  if (family.best_market_id && contract.market_id === family.best_market_id && contract.side === family.best_side) {
+    return { text: 'BEST BET', className: 'BEST_BET' };
+  }
+  if (family.warning_code === 'LINEUP_NOT_CONFIRMED') {
+    return { text: 'WAIT FOR LINEUP', className: 'WARNING' };
+  }
+  if (family.warning_code) return { text: 'SAFETY BLOCK', className: 'WARNING' };
+  if (Number(contract.edge) > 0) return { text: 'TOP OPTION · NO BET', className: 'ALTERNATIVE' };
+  return { text: 'PASS', className: 'PASS' };
 }
 
 function familyCard(family) {
-  const warning = family.warning_code ? `<div class="warning"><strong>${esc(family.warning_code)}</strong><br>${esc(family.warning_message)}</div>` : '';
+  const contract = selectedPropContract(family);
+  const decision = propDecisionLabel(family, contract);
+  const lineCount = new Set(family.contracts.map((item) => item.threshold)).size;
+  const warning = family.warning_code
+    ? `<div class="warning"><strong>${esc(family.warning_code)}</strong><br>${esc(family.warning_message)}</div>`
+    : '';
+  const action = contract && family.best_market_id === contract.market_id && family.best_side === contract.side
+    ? `<button class="bet-button prop-bet" data-family="${esc(family.family_key)}" data-market="${esc(contract.market_id)}" data-side="${esc(contract.side)}">Paper bet ${dollars(contract.proposed_stake)}</button>`
+    : contract
+      ? `<a class="secondary" href="${esc(contract.polymarket_url)}" target="_blank" rel="noreferrer">View market</a>`
+      : '';
+
+  const recommendation = contract
+    ? `<div class="prop-pick">
+        <div class="prop-pick-main">
+          <span class="decision ${esc(decision.className)}">${esc(decision.text)}</span>
+          <strong>${contract.threshold}+ STRIKEOUTS · ${esc(contract.side)}</strong>
+          <span>Selected from ${lineCount} line${lineCount === 1 ? '' : 's'} and ${family.contracts.length} priced sides.</span>
+        </div>
+        <div class="prop-metrics">
+          <div><span>Shrunk probability</span><strong>${pct(contract.conservative_probability)}</strong></div>
+          <div><span>Executable VWAP</span><strong>${cents(contract.executable_price)}</strong></div>
+          <div><span>Edge</span><strong class="${Number(contract.edge) >= 0 ? 'positive' : 'negative'}">${pct(contract.edge)}</strong></div>
+          <div><span>Expected ROI</span><strong>${pct(contract.expected_roi)}</strong></div>
+          <div><span>Quarter-Kelly stake</span><strong>${dollars(contract.proposed_stake)}</strong></div>
+        </div>
+        <div class="prop-action">${action}</div>
+      </div>`
+    : `<div class="empty compact">No executable YES or NO quote is currently available for this pitcher.</div>`;
+
   return `<article class="family-card">
     <div class="family-head">
       <div class="player">
@@ -231,8 +274,14 @@ function familyCard(family) {
       <div class="projection"><strong>${Number(family.expected_strikeouts).toFixed(2)} K</strong><span>${Number(family.projected_innings).toFixed(1)} projected innings · ${pct(family.matchup_k_rate)} matchup K%</span></div>
     </div>
     ${warning}
-    <div class="table-shell"><table><thead><tr><th>Line</th><th>Side</th><th>Raw p</th><th>Shrunk p</th><th>VWAP</th><th>Edge</th><th>ROI</th><th>Full Kelly</th><th>Decision</th><th>Action</th></tr></thead><tbody>${family.contracts.map((contract) => contractRow(family, contract)).join('')}</tbody></table></div>
+    ${recommendation}
   </article>`;
+}
+
+function propCoverageText(data) {
+  const d = data.diagnostics || {};
+  const skipped = Number(d.skipped_unmapped || 0) + Number(d.skipped_no_game || 0) + Number(d.skipped_no_book || 0) + Number(d.skipped_started || 0);
+  return `${Number(d.discovered || 0)} active strikeout markets discovered → ${data.families.length} pitchers after grouping · ${Number(d.priced_markets || 0)} priced threshold markets · ${skipped} skipped`;
 }
 
 async function loadProps(force = false) {
@@ -245,7 +294,7 @@ async function loadProps(force = false) {
     state.loaded.add('props');
     const best = data.families.filter((family) => family.best_market_id).length;
     const warnings = data.families.filter((family) => family.warning_code).length;
-    $('#prop-status').textContent = `${data.families.length} pitcher families · ${best} best bets · ${warnings} safety warnings · ${data.model_version}`;
+    $('#prop-status').textContent = `${propCoverageText(data)} · ${best} actionable best bets · ${warnings} safety warnings · ${data.model_version}`;
     replaceHtmlWithFragment($('#prop-board'), data.families.length ? data.families.map(familyCard).join('') : '<div class="empty">No upcoming mapped strikeout families.</div>');
   } catch (error) {
     $('#prop-board').innerHTML = `<div class="empty negative">${esc(error.message)}</div>`;

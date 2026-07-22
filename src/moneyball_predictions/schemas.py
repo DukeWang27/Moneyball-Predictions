@@ -517,6 +517,9 @@ class StrikeoutPropFamily(BaseModel):
     best_market_id: str | None = None
     best_side: Literal["YES", "NO"] | None = None
     best_threshold: int | None = None
+    top_market_id: str | None = None
+    top_side: Literal["YES", "NO"] | None = None
+    top_threshold: int | None = None
     contracts: list[PropContractEvaluation] = Field(default_factory=list)
     model_version: str
 
