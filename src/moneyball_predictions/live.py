@@ -16,6 +16,8 @@ from .lineup_offense import ConfirmedLineupAdjustment, build_confirmed_lineup_ad
 from .lineups import LineupStatus, parse_game_lineups
 from .market_archive import append_market_snapshots
 from .reproducibility import sha256_json
+from .runtime import running_on_vercel
+from .serverless_artifacts import load_live_model_bundle
 from .storage import insert_lineup_snapshot, insert_prediction
 from .mlb import (
     MlbDataError,
@@ -435,25 +437,42 @@ async def _live_optimized_context(
     if cached and now - cached.built_at < timedelta(minutes=MODEL_CACHE_MINUTES):
         return cached
 
-    years = [season - 4, season - 3, season - 2, season - 1]
-    historical_pairs, current_pair = await asyncio.gather(
-        asyncio.gather(*(_fetch_regular_year(client, year) for year in years)),
-        _fetch_regular_year(client, season, through),
-    )
-    historical = dict(historical_pairs)
-    preparation = prepare_model_tournament_multifold(
-        earlier_seed_games=historical[season - 4],
-        earlier_training_games=historical[season - 3],
-        earlier_validation_games=historical[season - 2],
-        seed_games=historical[season - 3],
-        training_games=historical[season - 2],
-        validation_games=historical[season - 1],
-        min_games=min_games,
-        fold_years=(season - 2, season - 1),
-    )
-    artifact = preparation.artifact
-    prior_summary = preparation.prior_summary
-    prior_elo = preparation.prior_elo
+    if running_on_vercel():
+        # Training the multi-season tournament during an HTTP request exceeds
+        # Hobby's function budget. Load the frozen pre-deployment artifact and
+        # only build the current-season feature state at request time.
+        bundle = load_live_model_bundle()
+        if bundle is None:
+            raise LivePredictionError(
+                "Serverless model artifact is missing; run scripts/export_serverless_artifacts.py"
+            )
+        artifact = bundle.get("artifact")
+        prior_summary = bundle.get("prior_summary")
+        prior_elo = bundle.get("prior_elo")
+        if artifact is None or prior_summary is None or prior_elo is None:
+            raise LivePredictionError("Serverless model artifact is incomplete")
+        current_pair = await _fetch_regular_year(client, season, through)
+    else:
+        years = [season - 4, season - 3, season - 2, season - 1]
+        historical_pairs, current_pair = await asyncio.gather(
+            asyncio.gather(*(_fetch_regular_year(client, year) for year in years)),
+            _fetch_regular_year(client, season, through),
+        )
+        historical = dict(historical_pairs)
+        preparation = prepare_model_tournament_multifold(
+            earlier_seed_games=historical[season - 4],
+            earlier_training_games=historical[season - 3],
+            earlier_validation_games=historical[season - 2],
+            seed_games=historical[season - 3],
+            training_games=historical[season - 2],
+            validation_games=historical[season - 1],
+            min_games=min_games,
+            fold_years=(season - 2, season - 1),
+        )
+        artifact = preparation.artifact
+        prior_summary = preparation.prior_summary
+        prior_elo = preparation.prior_elo
+
     _, engine = build_target_rows(
         games=current_pair[1],
         prior_summary=prior_summary,
@@ -560,6 +579,23 @@ def _archive_immutable_horizon_prediction(
         return
 
 
+async def _bounded_live_optimized_context(
+    client: httpx.AsyncClient,
+    *,
+    season: int,
+    through: date,
+) -> LiveOptimizedContext | None:
+    """Return the optimized context without allowing it to time out the board."""
+    timeout_seconds = 20.0 if running_on_vercel() else 180.0
+    try:
+        return await asyncio.wait_for(
+            _live_optimized_context(client, season=season, through=through),
+            timeout=timeout_seconds,
+        )
+    except (TimeoutError, LivePredictionError, httpx.HTTPError, ValueError, TypeError):
+        return None
+
+
 async def build_live_mlb_predictions(
     bankroll: float = 100.0,
     kelly_multiplier: float = 0.25,
@@ -587,7 +623,7 @@ async def build_live_mlb_predictions(
             team_stats_task = fetch_team_season_stats(client, resolved_season)
             prior_stats_task = fetch_team_season_stats(client, resolved_season - 1)
             schedule_task = fetch_mlb_schedule(client, start_date, end_date)
-            model_task = _live_optimized_context(
+            model_task = _bounded_live_optimized_context(
                 client,
                 season=resolved_season,
                 through=start_date,

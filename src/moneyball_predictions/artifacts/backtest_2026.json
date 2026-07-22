@@ -1,0 +1,1516 @@
+{
+  "generated_at": "2026-07-22T04:05:05.618464Z",
+  "season": 2026,
+  "prior_season": 2025,
+  "start_date": "2026-03-01",
+  "end_date": "2026-07-21",
+  "min_games": 10,
+  "completed_games": 1516,
+  "prediction_count": 1364,
+  "accuracy": 0.5498533724340176,
+  "brier_score": 0.2481875338417597,
+  "log_loss": 0.6895572275134049,
+  "home_baseline_accuracy": 0.5205278592375366,
+  "calibration": [
+    {
+      "label": "50%-60%",
+      "predictions": 1097,
+      "mean_probability": 0.5460378694170428,
+      "actual_rate": 0.5432999088422972
+    },
+    {
+      "label": "60%-70%",
+      "predictions": 261,
+      "mean_probability": 0.6287274765105204,
+      "actual_rate": 0.5747126436781609
+    },
+    {
+      "label": "70%-80%",
+      "predictions": 6,
+      "mean_probability": 0.7282923356648782,
+      "actual_rate": 0.6666666666666666
+    },
+    {
+      "label": "80%-90%",
+      "predictions": 0,
+      "mean_probability": null,
+      "actual_rate": null
+    },
+    {
+      "label": "90%-100%",
+      "predictions": 0,
+      "mean_probability": null,
+      "actual_rate": null
+    },
+    {
+      "label": "60%-80% combined",
+      "predictions": 267,
+      "mean_probability": 0.6309648890757869,
+      "actual_rate": 0.5767790262172284
+    }
+  ],
+  "recent_predictions": [
+    {
+      "game_pk": 824329,
+      "game_date": "2026-07-22T00:40:00Z",
+      "away_team": "Washington Nationals",
+      "home_team": "Colorado Rockies",
+      "away_score": 7,
+      "home_score": 8,
+      "away_probability": 0.46337397216232645,
+      "home_probability": 0.5366260278376735,
+      "predicted_winner": "Colorado Rockies",
+      "predicted_probability": 0.5366260278376735,
+      "winner": "Colorado Rockies",
+      "correct": true,
+      "brier": 0.2147154380774925,
+      "log_loss": 0.6224538370650589,
+      "baseline_away_probability": 0.602412634273999,
+      "baseline_home_probability": 0.39758736572600095,
+      "baseline_predicted_winner": "Washington Nationals",
+      "baseline_predicted_probability": 0.602412634273999,
+      "baseline_correct": false,
+      "raw_home_probability": 0.4417447801991668,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.5276053399026628,
+      "enhanced_v05_home_probability": 0.47239466009733727,
+      "enhanced_v05_predicted_winner": "Washington Nationals",
+      "enhanced_v05_predicted_probability": 0.5276053399026628,
+      "enhanced_v05_correct": false
+    },
+    {
+      "game_pk": 824165,
+      "game_date": "2026-07-22T00:10:00Z",
+      "away_team": "Miami Marlins",
+      "home_team": "Houston Astros",
+      "away_score": 3,
+      "home_score": 5,
+      "away_probability": 0.4877065083710185,
+      "home_probability": 0.5122934916289815,
+      "predicted_winner": "Houston Astros",
+      "predicted_probability": 0.5122934916289815,
+      "winner": "Houston Astros",
+      "correct": true,
+      "brier": 0.23785763830745033,
+      "log_loss": 0.6688575923359473,
+      "baseline_away_probability": 0.5654565750530038,
+      "baseline_home_probability": 0.43454342494699616,
+      "baseline_predicted_winner": "Miami Marlins",
+      "baseline_predicted_probability": 0.5654565750530038,
+      "baseline_correct": false,
+      "raw_home_probability": 0.4997400370072189,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.49260565750625107,
+      "enhanced_v05_home_probability": 0.5073943424937489,
+      "enhanced_v05_predicted_winner": "Houston Astros",
+      "enhanced_v05_predicted_probability": 0.5073943424937489,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 824652,
+      "game_date": "2026-07-22T00:05:00Z",
+      "away_team": "Detroit Tigers",
+      "home_team": "Chicago Cubs",
+      "away_score": 2,
+      "home_score": 11,
+      "away_probability": 0.4402886107812233,
+      "home_probability": 0.5597113892187767,
+      "predicted_winner": "Chicago Cubs",
+      "predicted_probability": 0.5597113892187767,
+      "winner": "Chicago Cubs",
+      "correct": true,
+      "brier": 0.19385406078365952,
+      "log_loss": 0.5803340045000458,
+      "baseline_away_probability": 0.4768103799892882,
+      "baseline_home_probability": 0.5231896200107118,
+      "baseline_predicted_winner": "Chicago Cubs",
+      "baseline_predicted_probability": 0.5231896200107118,
+      "baseline_correct": true,
+      "raw_home_probability": 0.568431027847411,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.4512019921230568,
+      "enhanced_v05_home_probability": 0.5487980078769432,
+      "enhanced_v05_predicted_winner": "Chicago Cubs",
+      "enhanced_v05_predicted_probability": 0.5487980078769432,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 822871,
+      "game_date": "2026-07-22T00:05:00Z",
+      "away_team": "Chicago White Sox",
+      "home_team": "Texas Rangers",
+      "away_score": 0,
+      "home_score": 10,
+      "away_probability": 0.4638149952433641,
+      "home_probability": 0.5361850047566359,
+      "predicted_winner": "Texas Rangers",
+      "predicted_probability": 0.5361850047566359,
+      "winner": "Texas Rangers",
+      "correct": true,
+      "brier": 0.21512434981260187,
+      "log_loss": 0.6232760193366466,
+      "baseline_away_probability": 0.5938340051905777,
+      "baseline_home_probability": 0.4061659948094223,
+      "baseline_predicted_winner": "Chicago White Sox",
+      "baseline_predicted_probability": 0.5938340051905777,
+      "baseline_correct": false,
+      "raw_home_probability": 0.48282804391770734,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.5027771630640461,
+      "enhanced_v05_home_probability": 0.497222836935954,
+      "enhanced_v05_predicted_winner": "Chicago White Sox",
+      "enhanced_v05_predicted_probability": 0.5027771630640461,
+      "enhanced_v05_correct": false
+    },
+    {
+      "game_pk": 824085,
+      "game_date": "2026-07-21T23:40:00Z",
+      "away_team": "San Francisco Giants",
+      "home_team": "Kansas City Royals",
+      "away_score": 2,
+      "home_score": 3,
+      "away_probability": 0.47238392031648024,
+      "home_probability": 0.5276160796835198,
+      "predicted_winner": "Kansas City Royals",
+      "predicted_probability": 0.5276160796835198,
+      "winner": "Kansas City Royals",
+      "correct": true,
+      "brier": 0.22314656817356676,
+      "log_loss": 0.6393863815686701,
+      "baseline_away_probability": 0.5380855736044143,
+      "baseline_home_probability": 0.46191442639558566,
+      "baseline_predicted_winner": "San Francisco Giants",
+      "baseline_predicted_probability": 0.5380855736044143,
+      "baseline_correct": false,
+      "raw_home_probability": 0.5106881791735481,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.4860254194649425,
+      "enhanced_v05_home_probability": 0.5139745805350575,
+      "enhanced_v05_predicted_winner": "Kansas City Royals",
+      "enhanced_v05_predicted_probability": 0.5139745805350575,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 823760,
+      "game_date": "2026-07-21T23:40:00Z",
+      "away_team": "New York Mets",
+      "home_team": "Milwaukee Brewers",
+      "away_score": 4,
+      "home_score": 0,
+      "away_probability": 0.3913929014477957,
+      "home_probability": 0.6086070985522043,
+      "predicted_winner": "Milwaukee Brewers",
+      "predicted_probability": 0.6086070985522043,
+      "winner": "New York Mets",
+      "correct": false,
+      "brier": 0.3704026004081325,
+      "log_loss": 0.9380433604958276,
+      "baseline_away_probability": 0.2970942758133963,
+      "baseline_home_probability": 0.7029057241866037,
+      "baseline_predicted_winner": "Milwaukee Brewers",
+      "baseline_predicted_probability": 0.7029057241866037,
+      "baseline_correct": false,
+      "raw_home_probability": 0.7119506936517445,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.3602579748272613,
+      "enhanced_v05_home_probability": 0.6397420251727387,
+      "enhanced_v05_predicted_winner": "Milwaukee Brewers",
+      "enhanced_v05_predicted_probability": 0.6397420251727387,
+      "enhanced_v05_correct": false
+    },
+    {
+      "game_pk": 824895,
+      "game_date": "2026-07-21T23:15:00Z",
+      "away_team": "San Diego Padres",
+      "home_team": "Atlanta Braves",
+      "away_score": 8,
+      "home_score": 3,
+      "away_probability": 0.3760728209491644,
+      "home_probability": 0.6239271790508356,
+      "predicted_winner": "Atlanta Braves",
+      "predicted_probability": 0.6239271790508356,
+      "winner": "San Diego Padres",
+      "correct": false,
+      "brier": 0.3892851247583335,
+      "log_loss": 0.9779724816072466,
+      "baseline_away_probability": 0.35760508176767514,
+      "baseline_home_probability": 0.6423949182323249,
+      "baseline_predicted_winner": "Atlanta Braves",
+      "baseline_predicted_probability": 0.6423949182323249,
+      "baseline_correct": false,
+      "raw_home_probability": 0.6472344424699996,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.40249147580793254,
+      "enhanced_v05_home_probability": 0.5975085241920675,
+      "enhanced_v05_predicted_winner": "Atlanta Braves",
+      "enhanced_v05_predicted_probability": 0.5975085241920675,
+      "enhanced_v05_correct": false
+    },
+    {
+      "game_pk": 822787,
+      "game_date": "2026-07-21T23:07:00Z",
+      "away_team": "Tampa Bay Rays",
+      "home_team": "Toronto Blue Jays",
+      "away_score": 12,
+      "home_score": 2,
+      "away_probability": 0.4726710568168184,
+      "home_probability": 0.5273289431831816,
+      "predicted_winner": "Toronto Blue Jays",
+      "predicted_probability": 0.5273289431831816,
+      "winner": "Tampa Bay Rays",
+      "correct": false,
+      "brier": 0.27807581431869116,
+      "log_loss": 0.7493555725544421,
+      "baseline_away_probability": 0.5766020150800901,
+      "baseline_home_probability": 0.4233979849199099,
+      "baseline_predicted_winner": "Tampa Bay Rays",
+      "baseline_predicted_probability": 0.5766020150800901,
+      "baseline_correct": true,
+      "raw_home_probability": 0.486395643824476,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.5006301975945242,
+      "enhanced_v05_home_probability": 0.49936980240547574,
+      "enhanced_v05_predicted_winner": "Tampa Bay Rays",
+      "enhanced_v05_predicted_probability": 0.5006301975945242,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 824409,
+      "game_date": "2026-07-21T22:40:00Z",
+      "away_team": "Minnesota Twins",
+      "home_team": "Cleveland Guardians",
+      "away_score": 2,
+      "home_score": 5,
+      "away_probability": 0.40776983495711994,
+      "home_probability": 0.5922301650428801,
+      "predicted_winner": "Cleveland Guardians",
+      "predicted_probability": 0.5922301650428801,
+      "winner": "Cleveland Guardians",
+      "correct": true,
+      "brier": 0.16627623830095684,
+      "log_loss": 0.5238599273561121,
+      "baseline_away_probability": 0.4714938123614203,
+      "baseline_home_probability": 0.5285061876385797,
+      "baseline_predicted_winner": "Cleveland Guardians",
+      "baseline_predicted_probability": 0.5285061876385797,
+      "baseline_correct": true,
+      "raw_home_probability": 0.5732036848706945,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.4483033394227778,
+      "enhanced_v05_home_probability": 0.5516966605772222,
+      "enhanced_v05_predicted_winner": "Cleveland Guardians",
+      "enhanced_v05_predicted_probability": 0.5516966605772222,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 823437,
+      "game_date": "2026-07-21T22:40:00Z",
+      "away_team": "Los Angeles Dodgers",
+      "home_team": "Philadelphia Phillies",
+      "away_score": 2,
+      "home_score": 1,
+      "away_probability": 0.5108810798220919,
+      "home_probability": 0.48911892017790815,
+      "predicted_winner": "Los Angeles Dodgers",
+      "predicted_probability": 0.5108810798220919,
+      "winner": "Los Angeles Dodgers",
+      "correct": true,
+      "brier": 0.23923731807600288,
+      "log_loss": 0.6716184363667639,
+      "baseline_away_probability": 0.6643699687448263,
+      "baseline_home_probability": 0.33563003125517366,
+      "baseline_predicted_winner": "Los Angeles Dodgers",
+      "baseline_predicted_probability": 0.6643699687448263,
+      "baseline_correct": true,
+      "raw_home_probability": 0.4073497363890557,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.5486496348060756,
+      "enhanced_v05_home_probability": 0.4513503651939244,
+      "enhanced_v05_predicted_winner": "Los Angeles Dodgers",
+      "enhanced_v05_predicted_probability": 0.5486496348060756,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 824006,
+      "game_date": "2026-07-21T02:10:00Z",
+      "away_team": "St. Louis Cardinals",
+      "home_team": "Los Angeles Angels",
+      "away_score": 2,
+      "home_score": 3,
+      "away_probability": 0.49064175620124395,
+      "home_probability": 0.509358243798756,
+      "predicted_winner": "Los Angeles Angels",
+      "predicted_probability": 0.509358243798756,
+      "winner": "Los Angeles Angels",
+      "correct": true,
+      "brier": 0.24072933292824092,
+      "log_loss": 0.6746036911378864,
+      "baseline_away_probability": 0.567155921373625,
+      "baseline_home_probability": 0.432844078626375,
+      "baseline_predicted_winner": "St. Louis Cardinals",
+      "baseline_predicted_probability": 0.567155921373625,
+      "baseline_correct": false,
+      "raw_home_probability": 0.4805979598185615,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.5041196918174339,
+      "enhanced_v05_home_probability": 0.4958803081825661,
+      "enhanced_v05_predicted_winner": "St. Louis Cardinals",
+      "enhanced_v05_predicted_probability": 0.5041196918174339,
+      "enhanced_v05_correct": false
+    },
+    {
+      "game_pk": 825058,
+      "game_date": "2026-07-21T01:40:00Z",
+      "away_team": "Athletics",
+      "home_team": "Arizona Diamondbacks",
+      "away_score": 5,
+      "home_score": 2,
+      "away_probability": 0.3933820951591007,
+      "home_probability": 0.6066179048408993,
+      "predicted_winner": "Arizona Diamondbacks",
+      "predicted_probability": 0.6066179048408993,
+      "winner": "Athletics",
+      "correct": false,
+      "brier": 0.3679852824735623,
+      "log_loss": 0.9329738871307974,
+      "baseline_away_probability": 0.40184228658858445,
+      "baseline_home_probability": 0.5981577134114155,
+      "baseline_predicted_winner": "Arizona Diamondbacks",
+      "baseline_predicted_probability": 0.5981577134114155,
+      "baseline_correct": false,
+      "raw_home_probability": 0.6282275562155882,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.4144443011743487,
+      "enhanced_v05_home_probability": 0.5855556988256513,
+      "enhanced_v05_predicted_winner": "Arizona Diamondbacks",
+      "enhanced_v05_predicted_probability": 0.5855556988256513,
+      "enhanced_v05_correct": false
+    },
+    {
+      "game_pk": 823112,
+      "game_date": "2026-07-21T01:40:00Z",
+      "away_team": "Cincinnati Reds",
+      "home_team": "Seattle Mariners",
+      "away_score": 0,
+      "home_score": 8,
+      "away_probability": 0.39298453167122027,
+      "home_probability": 0.6070154683287797,
+      "predicted_winner": "Seattle Mariners",
+      "predicted_probability": 0.6070154683287797,
+      "winner": "Seattle Mariners",
+      "correct": true,
+      "brier": 0.15443684213284833,
+      "log_loss": 0.49920100500387193,
+      "baseline_away_probability": 0.4230601892624375,
+      "baseline_home_probability": 0.5769398107375625,
+      "baseline_predicted_winner": "Seattle Mariners",
+      "baseline_predicted_probability": 0.5769398107375625,
+      "baseline_correct": true,
+      "raw_home_probability": 0.607510225489677,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.4273044436722432,
+      "enhanced_v05_home_probability": 0.5726955563277568,
+      "enhanced_v05_predicted_winner": "Seattle Mariners",
+      "enhanced_v05_predicted_probability": 0.5726955563277568,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 824328,
+      "game_date": "2026-07-21T00:40:00Z",
+      "away_team": "Washington Nationals",
+      "home_team": "Colorado Rockies",
+      "away_score": 7,
+      "home_score": 3,
+      "away_probability": 0.5337000707806676,
+      "home_probability": 0.4662999292193324,
+      "predicted_winner": "Washington Nationals",
+      "predicted_probability": 0.5337000707806676,
+      "winner": "Washington Nationals",
+      "correct": true,
+      "brier": 0.2174356239899544,
+      "log_loss": 0.627921263019673,
+      "baseline_away_probability": 0.5962472744528183,
+      "baseline_home_probability": 0.40375272554718167,
+      "baseline_predicted_winner": "Washington Nationals",
+      "baseline_predicted_probability": 0.5962472744528183,
+      "baseline_correct": true,
+      "raw_home_probability": 0.44691583950230107,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.5244658316826143,
+      "enhanced_v05_home_probability": 0.47553416831738576,
+      "enhanced_v05_predicted_winner": "Washington Nationals",
+      "enhanced_v05_predicted_probability": 0.5244658316826143,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 824167,
+      "game_date": "2026-07-21T00:10:00Z",
+      "away_team": "Miami Marlins",
+      "home_team": "Houston Astros",
+      "away_score": 5,
+      "home_score": 8,
+      "away_probability": 0.4966320333644313,
+      "home_probability": 0.5033679666355687,
+      "predicted_winner": "Houston Astros",
+      "predicted_probability": 0.5033679666355687,
+      "winner": "Houston Astros",
+      "correct": true,
+      "brier": 0.2466433765636896,
+      "log_loss": 0.6864338323231949,
+      "baseline_away_probability": 0.5723416637819383,
+      "baseline_home_probability": 0.4276583362180617,
+      "baseline_predicted_winner": "Miami Marlins",
+      "baseline_predicted_probability": 0.5723416637819383,
+      "baseline_correct": false,
+      "raw_home_probability": 0.4943317394594745,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.4958902288050422,
+      "enhanced_v05_home_probability": 0.5041097711949578,
+      "enhanced_v05_predicted_winner": "Houston Astros",
+      "enhanced_v05_predicted_probability": 0.5041097711949578,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 824654,
+      "game_date": "2026-07-21T00:05:00Z",
+      "away_team": "Detroit Tigers",
+      "home_team": "Chicago Cubs",
+      "away_score": 8,
+      "home_score": 6,
+      "away_probability": 0.4821104737628493,
+      "home_probability": 0.5178895262371507,
+      "predicted_winner": "Chicago Cubs",
+      "predicted_probability": 0.5178895262371507,
+      "winner": "Detroit Tigers",
+      "correct": false,
+      "brier": 0.2682095613861404,
+      "log_loss": 0.7295819925154304,
+      "baseline_away_probability": 0.47226826274674916,
+      "baseline_home_probability": 0.5277317372532508,
+      "baseline_predicted_winner": "Chicago Cubs",
+      "baseline_predicted_probability": 0.5277317372532508,
+      "baseline_correct": false,
+      "raw_home_probability": 0.572025611505323,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.4496888361732967,
+      "enhanced_v05_home_probability": 0.5503111638267033,
+      "enhanced_v05_predicted_winner": "Chicago Cubs",
+      "enhanced_v05_predicted_probability": 0.5503111638267033,
+      "enhanced_v05_correct": false
+    },
+    {
+      "game_pk": 822874,
+      "game_date": "2026-07-21T00:05:00Z",
+      "away_team": "Chicago White Sox",
+      "home_team": "Texas Rangers",
+      "away_score": 10,
+      "home_score": 3,
+      "away_probability": 0.42504242722837937,
+      "home_probability": 0.5749575727716206,
+      "predicted_winner": "Texas Rangers",
+      "predicted_probability": 0.5749575727716206,
+      "winner": "Chicago White Sox",
+      "correct": false,
+      "brier": 0.3305762104874334,
+      "log_loss": 0.8555662862676232,
+      "baseline_away_probability": 0.5805119377321472,
+      "baseline_home_probability": 0.41948806226785285,
+      "baseline_predicted_winner": "Chicago White Sox",
+      "baseline_predicted_probability": 0.5805119377321472,
+      "baseline_correct": true,
+      "raw_home_probability": 0.4942129618535698,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.49596066904324787,
+      "enhanced_v05_home_probability": 0.5040393309567521,
+      "enhanced_v05_predicted_winner": "Texas Rangers",
+      "enhanced_v05_predicted_probability": 0.5040393309567521,
+      "enhanced_v05_correct": false
+    },
+    {
+      "game_pk": 824087,
+      "game_date": "2026-07-20T23:40:00Z",
+      "away_team": "San Francisco Giants",
+      "home_team": "Kansas City Royals",
+      "away_score": 3,
+      "home_score": 4,
+      "away_probability": 0.4670988305741096,
+      "home_probability": 0.5329011694258904,
+      "predicted_winner": "Kansas City Royals",
+      "predicted_probability": 0.5329011694258904,
+      "winner": "Kansas City Royals",
+      "correct": true,
+      "brier": 0.21818131752370076,
+      "log_loss": 0.6294192952252678,
+      "baseline_away_probability": 0.5404357570242195,
+      "baseline_home_probability": 0.45956424297578047,
+      "baseline_predicted_winner": "San Francisco Giants",
+      "baseline_predicted_probability": 0.5404357570242195,
+      "baseline_correct": false,
+      "raw_home_probability": 0.5088087279471704,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.4873072578476879,
+      "enhanced_v05_home_probability": 0.5126927421523121,
+      "enhanced_v05_predicted_winner": "Kansas City Royals",
+      "enhanced_v05_predicted_probability": 0.5126927421523121,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 823762,
+      "game_date": "2026-07-20T23:40:00Z",
+      "away_team": "New York Mets",
+      "home_team": "Milwaukee Brewers",
+      "away_score": 3,
+      "home_score": 8,
+      "away_probability": 0.327762650551468,
+      "home_probability": 0.672237349448532,
+      "predicted_winner": "Milwaukee Brewers",
+      "predicted_probability": 0.672237349448532,
+      "winner": "Milwaukee Brewers",
+      "correct": true,
+      "brier": 0.10742835509652375,
+      "log_loss": 0.3971438022347993,
+      "baseline_away_probability": 0.30400947098423636,
+      "baseline_home_probability": 0.6959905290157636,
+      "baseline_predicted_winner": "Milwaukee Brewers",
+      "baseline_predicted_probability": 0.6959905290157636,
+      "baseline_correct": true,
+      "raw_home_probability": 0.7063110870459987,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.36580237348392763,
+      "enhanced_v05_home_probability": 0.6341976265160724,
+      "enhanced_v05_predicted_winner": "Milwaukee Brewers",
+      "enhanced_v05_predicted_probability": 0.6341976265160724,
+      "enhanced_v05_correct": true
+    },
+    {
+      "game_pk": 824898,
+      "game_date": "2026-07-20T23:15:00Z",
+      "away_team": "San Diego Padres",
+      "home_team": "Atlanta Braves",
+      "away_score": 2,
+      "home_score": 3,
+      "away_probability": 0.3755248861449304,
+      "home_probability": 0.6244751138550696,
+      "predicted_winner": "Atlanta Braves",
+      "predicted_probability": 0.6244751138550696,
+      "winner": "Atlanta Braves",
+      "correct": true,
+      "brier": 0.14101894011416294,
+      "log_loss": 0.4708437999221835,
+      "baseline_away_probability": 0.3586607188993295,
+      "baseline_home_probability": 0.6413392811006705,
+      "baseline_predicted_winner": "Atlanta Braves",
+      "baseline_predicted_probability": 0.6413392811006705,
+      "baseline_correct": true,
+      "raw_home_probability": 0.6462041160484003,
+      "calibrated": true,
+      "enhanced_v05_away_probability": 0.4044135766572732,
+      "enhanced_v05_home_probability": 0.5955864233427268,
+      "enhanced_v05_predicted_winner": "Atlanta Braves",
+      "enhanced_v05_predicted_probability": 0.5955864233427268,
+      "enhanced_v05_correct": true
+    }
+  ],
+  "baseline": {
+    "key": "baseline",
+    "label": "Old v0.4",
+    "prediction_count": 1364,
+    "accuracy": 0.5249266862170088,
+    "brier_score": 0.2578202908395285,
+    "log_loss": 0.7116348865498145,
+    "calibration": [
+      {
+        "label": "50%-60%",
+        "predictions": 843,
+        "mean_probability": 0.5448516521994844,
+        "actual_rate": 0.5172004744958482
+      },
+      {
+        "label": "60%-70%",
+        "predictions": 353,
+        "mean_probability": 0.6441099457014453,
+        "actual_rate": 0.5127478753541076
+      },
+      {
+        "label": "70%-80%",
+        "predictions": 143,
+        "mean_probability": 0.737574796643465,
+        "actual_rate": 0.6153846153846154
+      },
+      {
+        "label": "80%-90%",
+        "predictions": 25,
+        "mean_probability": 0.8384976659852649,
+        "actual_rate": 0.44
+      },
+      {
+        "label": "90%-100%",
+        "predictions": 0,
+        "mean_probability": null,
+        "actual_rate": null
+      },
+      {
+        "label": "60%-80% combined",
+        "predictions": 496,
+        "mean_probability": 0.6710564652270677,
+        "actual_rate": 0.5423387096774194
+      }
+    ]
+  },
+  "enhanced": {
+    "key": "enhanced",
+    "label": "Enhanced v0.5",
+    "prediction_count": 1364,
+    "accuracy": 0.5395894428152492,
+    "brier_score": 0.24849920021610822,
+    "log_loss": 0.6901734780427381,
+    "calibration": [
+      {
+        "label": "50%-60%",
+        "predictions": 1172,
+        "mean_probability": 0.5423740957155918,
+        "actual_rate": 0.5273037542662116
+      },
+      {
+        "label": "60%-70%",
+        "predictions": 189,
+        "mean_probability": 0.6298997881188422,
+        "actual_rate": 0.6084656084656085
+      },
+      {
+        "label": "70%-80%",
+        "predictions": 3,
+        "mean_probability": 0.7155045838441695,
+        "actual_rate": 1.0
+      },
+      {
+        "label": "80%-90%",
+        "predictions": 0,
+        "mean_probability": null,
+        "actual_rate": null
+      },
+      {
+        "label": "90%-100%",
+        "predictions": 0,
+        "mean_probability": null,
+        "actual_rate": null
+      },
+      {
+        "label": "60%-80% combined",
+        "predictions": 192,
+        "mean_probability": 0.6312373630520505,
+        "actual_rate": 0.6145833333333334
+      }
+    ]
+  },
+  "optimized": {
+    "key": "optimized",
+    "label": "v0.12 Regularized logistic",
+    "prediction_count": 1364,
+    "accuracy": 0.5498533724340176,
+    "brier_score": 0.2481875338417597,
+    "log_loss": 0.6895572275134049,
+    "calibration": [
+      {
+        "label": "50%-60%",
+        "predictions": 1097,
+        "mean_probability": 0.5460378694170428,
+        "actual_rate": 0.5432999088422972
+      },
+      {
+        "label": "60%-70%",
+        "predictions": 261,
+        "mean_probability": 0.6287274765105204,
+        "actual_rate": 0.5747126436781609
+      },
+      {
+        "label": "70%-80%",
+        "predictions": 6,
+        "mean_probability": 0.7282923356648782,
+        "actual_rate": 0.6666666666666666
+      },
+      {
+        "label": "80%-90%",
+        "predictions": 0,
+        "mean_probability": null,
+        "actual_rate": null
+      },
+      {
+        "label": "90%-100%",
+        "predictions": 0,
+        "mean_probability": null,
+        "actual_rate": null
+      },
+      {
+        "label": "60%-80% combined",
+        "predictions": 267,
+        "mean_probability": 0.6309648890757869,
+        "actual_rate": 0.5767790262172284
+      }
+    ]
+  },
+  "ablations": [
+    {
+      "key": "v07",
+      "label": "v0.7 proxy benchmark",
+      "prediction_count": 1364,
+      "accuracy": 0.5359237536656891,
+      "brier_score": 0.24871280301978116,
+      "log_loss": 0.6907296976878121,
+      "calibration": [
+        {
+          "label": "50%-60%",
+          "predictions": 1229,
+          "mean_probability": 0.5518797066394745,
+          "actual_rate": 0.5288852725793328
+        },
+        {
+          "label": "60%-70%",
+          "predictions": 76,
+          "mean_probability": 0.6401147644190555,
+          "actual_rate": 0.6052631578947368
+        },
+        {
+          "label": "70%-80%",
+          "predictions": 50,
+          "mean_probability": 0.7076117886178862,
+          "actual_rate": 0.58
+        },
+        {
+          "label": "80%-90%",
+          "predictions": 6,
+          "mean_probability": 0.8076923076923076,
+          "actual_rate": 0.5
+        },
+        {
+          "label": "90%-100%",
+          "predictions": 3,
+          "mean_probability": 0.92,
+          "actual_rate": 1.0
+        }
+      ]
+    },
+    {
+      "key": "componentstarter",
+      "label": "+ aggregate starter components",
+      "prediction_count": 1364,
+      "accuracy": 0.5425219941348973,
+      "brier_score": 0.2484707030672306,
+      "log_loss": 0.6908580021474725,
+      "calibration": [
+        {
+          "label": "50%-60%",
+          "predictions": 1238,
+          "mean_probability": 0.5465529615485268,
+          "actual_rate": 0.5339256865912763
+        },
+        {
+          "label": "60%-70%",
+          "predictions": 81,
+          "mean_probability": 0.6574003743938318,
+          "actual_rate": 0.6296296296296297
+        },
+        {
+          "label": "70%-80%",
+          "predictions": 40,
+          "mean_probability": 0.7332149268622814,
+          "actual_rate": 0.625
+        },
+        {
+          "label": "80%-90%",
+          "predictions": 0,
+          "mean_probability": null,
+          "actual_rate": null
+        },
+        {
+          "label": "90%-100%",
+          "predictions": 5,
+          "mean_probability": 0.9200000000000002,
+          "actual_rate": 0.6
+        }
+      ]
+    },
+    {
+      "key": "starterworkload",
+      "label": "+ starter quality × expected innings",
+      "prediction_count": 1364,
+      "accuracy": 0.5432551319648093,
+      "brier_score": 0.2489926935235657,
+      "log_loss": 0.69205062950372,
+      "calibration": [
+        {
+          "label": "50%-60%",
+          "predictions": 1236,
+          "mean_probability": 0.5452848088125781,
+          "actual_rate": 0.5355987055016181
+        },
+        {
+          "label": "60%-70%",
+          "predictions": 90,
+          "mean_probability": 0.6658295291546881,
+          "actual_rate": 0.6222222222222222
+        },
+        {
+          "label": "70%-80%",
+          "predictions": 33,
+          "mean_probability": 0.7396189516045878,
+          "actual_rate": 0.6060606060606061
+        },
+        {
+          "label": "80%-90%",
+          "predictions": 0,
+          "mean_probability": null,
+          "actual_rate": null
+        },
+        {
+          "label": "90%-100%",
+          "predictions": 5,
+          "mean_probability": 0.9200000000000002,
+          "actual_rate": 0.6
+        }
+      ]
+    },
+    {
+      "key": "park",
+      "label": "+ prior-season park interaction",
+      "prediction_count": 1364,
+      "accuracy": 0.5432551319648093,
+      "brier_score": 0.24829911892266635,
+      "log_loss": 0.6900661638267236,
+      "calibration": [
+        {
+          "label": "50%-60%",
+          "predictions": 1238,
+          "mean_probability": 0.5451903990123649,
+          "actual_rate": 0.5363489499192245
+        },
+        {
+          "label": "60%-70%",
+          "predictions": 114,
+          "mean_probability": 0.6714459774022528,
+          "actual_rate": 0.5964912280701754
+        },
+        {
+          "label": "70%-80%",
+          "predictions": 8,
+          "mean_probability": 0.7739898989898989,
+          "actual_rate": 0.75
+        },
+        {
+          "label": "80%-90%",
+          "predictions": 0,
+          "mean_probability": null,
+          "actual_rate": null
+        },
+        {
+          "label": "90%-100%",
+          "predictions": 4,
+          "mean_probability": 0.92,
+          "actual_rate": 0.75
+        }
+      ]
+    },
+    {
+      "key": "startersplit",
+      "label": "+ separate K/BB/HR starter rates",
+      "prediction_count": 1364,
+      "accuracy": 0.5417888563049853,
+      "brier_score": 0.24764307024741058,
+      "log_loss": 0.688476566173479,
+      "calibration": [
+        {
+          "label": "50%-60%",
+          "predictions": 1000,
+          "mean_probability": 0.5349576405110475,
+          "actual_rate": 0.523
+        },
+        {
+          "label": "60%-70%",
+          "predictions": 316,
+          "mean_probability": 0.6134183596438864,
+          "actual_rate": 0.5854430379746836
+        },
+        {
+          "label": "70%-80%",
+          "predictions": 45,
+          "mean_probability": 0.7485488605916808,
+          "actual_rate": 0.6222222222222222
+        },
+        {
+          "label": "80%-90%",
+          "predictions": 0,
+          "mean_probability": null,
+          "actual_rate": null
+        },
+        {
+          "label": "90%-100%",
+          "predictions": 3,
+          "mean_probability": 0.92,
+          "actual_rate": 1.0
+        }
+      ]
+    },
+    {
+      "key": "parkneutralsplit",
+      "label": "+ park-neutral team strength",
+      "prediction_count": 1364,
+      "accuracy": 0.5454545454545454,
+      "brier_score": 0.24845265610668113,
+      "log_loss": 0.6903213541033607,
+      "calibration": [
+        {
+          "label": "50%-60%",
+          "predictions": 1015,
+          "mean_probability": 0.5347008877666085,
+          "actual_rate": 0.5339901477832513
+        },
+        {
+          "label": "60%-70%",
+          "predictions": 321,
+          "mean_probability": 0.6163305014258703,
+          "actual_rate": 0.5763239875389408
+        },
+        {
+          "label": "70%-80%",
+          "predictions": 18,
+          "mean_probability": 0.7567049808429119,
+          "actual_rate": 0.6111111111111112
+        },
+        {
+          "label": "80%-90%",
+          "predictions": 8,
+          "mean_probability": 0.8125,
+          "actual_rate": 0.5
+        },
+        {
+          "label": "90%-100%",
+          "predictions": 2,
+          "mean_probability": 0.92,
+          "actual_rate": 1.0
+        }
+      ]
+    },
+    {
+      "key": "baserunsstarter",
+      "label": "+ Base Runs/Pythagenpat team strength",
+      "prediction_count": 1364,
+      "accuracy": 0.5395894428152492,
+      "brier_score": 0.2491329753447642,
+      "log_loss": 0.6928027727255847,
+      "calibration": [
+        {
+          "label": "50%-60%",
+          "predictions": 1117,
+          "mean_probability": 0.5481151918503416,
+          "actual_rate": 0.5192479856759177
+        },
+        {
+          "label": "60%-70%",
+          "predictions": 218,
+          "mean_probability": 0.6206282645123429,
+          "actual_rate": 0.6330275229357798
+        },
+        {
+          "label": "70%-80%",
+          "predictions": 0,
+          "mean_probability": null,
+          "actual_rate": null
+        },
+        {
+          "label": "80%-90%",
+          "predictions": 22,
+          "mean_probability": 0.84375,
+          "actual_rate": 0.5909090909090909
+        },
+        {
+          "label": "90%-100%",
+          "predictions": 7,
+          "mean_probability": 0.92,
+          "actual_rate": 0.7142857142857143
+        }
+      ]
+    },
+    {
+      "key": "bullpenquality",
+      "label": "+ bullpen quality (experimental)",
+      "prediction_count": 1364,
+      "accuracy": 0.5388563049853372,
+      "brier_score": 0.2492980399435209,
+      "log_loss": 0.6927881787613583,
+      "calibration": [
+        {
+          "label": "50%-60%",
+          "predictions": 1203,
+          "mean_probability": 0.5413211282254956,
+          "actual_rate": 0.5344970906068163
+        },
+        {
+          "label": "60%-70%",
+          "predictions": 132,
+          "mean_probability": 0.658125175463319,
+          "actual_rate": 0.553030303030303
+        },
+        {
+          "label": "70%-80%",
+          "predictions": 11,
+          "mean_probability": 0.7272727272727274,
+          "actual_rate": 0.8181818181818182
+        },
+        {
+          "label": "80%-90%",
+          "predictions": 16,
+          "mean_probability": 0.840701937295975,
+          "actual_rate": 0.5
+        },
+        {
+          "label": "90%-100%",
+          "predictions": 2,
+          "mean_probability": 0.92,
+          "actual_rate": 1.0
+        }
+      ]
+    },
+    {
+      "key": "full",
+      "label": "+ fatigue (experimental)",
+      "prediction_count": 1364,
+      "accuracy": 0.5432551319648093,
+      "brier_score": 0.24890576528015204,
+      "log_loss": 0.6919185531261114,
+      "calibration": [
+        {
+          "label": "50%-60%",
+          "predictions": 1185,
+          "mean_probability": 0.5414661195602497,
+          "actual_rate": 0.5375527426160338
+        },
+        {
+          "label": "60%-70%",
+          "predictions": 141,
+          "mean_probability": 0.6452578798550411,
+          "actual_rate": 0.5602836879432624
+        },
+        {
+          "label": "70%-80%",
+          "predictions": 26,
+          "mean_probability": 0.7307692307692306,
+          "actual_rate": 0.6923076923076923
+        },
+        {
+          "label": "80%-90%",
+          "predictions": 10,
+          "mean_probability": 0.8707169567135326,
+          "actual_rate": 0.5
+        },
+        {
+          "label": "90%-100%",
+          "predictions": 2,
+          "mean_probability": 0.92,
+          "actual_rate": 1.0
+        }
+      ]
+    }
+  ],
+  "accuracy_delta": 0.01026392961876832,
+  "brier_delta": 0.00031166637434851263,
+  "log_loss_delta": 0.0006162505293332288,
+  "calibration_training_games": 3644,
+  "optimized_training_games": 2274,
+  "optimized_validation_games": 2280,
+  "optimized_training_starter_coverage": 0.9982409850483729,
+  "optimized_validation_starter_coverage": 0.9973684210526316,
+  "target_starter_coverage": 0.998533724340176,
+  "optimized_training_component_coverage": 1.0,
+  "optimized_validation_component_coverage": 1.0,
+  "target_component_coverage": 0.9824046920821115,
+  "optimized_training_bullpen_coverage": 0.9885664028144239,
+  "optimized_validation_bullpen_coverage": 0.9881578947368421,
+  "target_bullpen_coverage": 0.9750733137829912,
+  "optimized_shrinkage": 0.0,
+  "optimized_calibration_method": "platt",
+  "optimized_coefficients": {
+    "Intercept": 0.10480122052636555,
+    "Base": 0.26881361531736164,
+    "StarterComponent": 0.14078114264688368
+  },
+  "optimized_variant": "Regularized logistic",
+  "feature_diagnostics": [
+    {
+      "name": "Base",
+      "mean": 0.1651775916612549,
+      "std": 0.3809990571004548,
+      "minimum": -1.0219827477436947,
+      "p05": -0.4939623124434229,
+      "median": 0.16335466493364126,
+      "p95": 0.812134161157012,
+      "maximum": 1.4840092799945026,
+      "unique_values": 1364,
+      "near_constant": false,
+      "coefficient": 0.26881361531736164
+    },
+    {
+      "name": "ProxyStarter",
+      "mean": -0.014603166373759694,
+      "std": 0.9344586592939566,
+      "minimum": -4.666666666666667,
+      "p05": -1.4738893012358487,
+      "median": -0.020858756013016677,
+      "p95": 1.4431331692501046,
+      "maximum": 4.589743589743589,
+      "unique_values": 1350,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "ProxyBullpen",
+      "mean": -0.013153480603770024,
+      "std": 0.39468839762319124,
+      "minimum": -1.3447003671414393,
+      "p05": -0.6628331450747273,
+      "median": 0.006525468894875597,
+      "p95": 0.615333048550111,
+      "maximum": 1.1075547568390103,
+      "unique_values": 1363,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "StarterComponent",
+      "mean": -0.007408253174918461,
+      "std": 0.20283560944921686,
+      "minimum": -0.6306642453020582,
+      "p05": -0.3362432587659578,
+      "median": -0.007105658931520584,
+      "p95": 0.3318749742311318,
+      "maximum": 0.6362646635779348,
+      "unique_values": 1364,
+      "near_constant": false,
+      "coefficient": 0.14078114264688368
+    },
+    {
+      "name": "ExpectedInnings",
+      "mean": -0.03541356491584746,
+      "std": 0.790299971301885,
+      "minimum": -2.354742992787364,
+      "p05": -1.3807248242490646,
+      "median": -0.00936024590273643,
+      "p95": 1.3968757070725117,
+      "maximum": 2.15902492467817,
+      "unique_values": 1338,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "BullpenComponent",
+      "mean": -0.0006624011516331913,
+      "std": 0.07505309583884666,
+      "minimum": -0.20876443897797,
+      "p05": -0.1226135313050468,
+      "median": 0.0023873014169533014,
+      "p95": 0.11741864665059634,
+      "maximum": 0.18222395202333797,
+      "unique_values": 1363,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "BullpenFatigue",
+      "mean": -0.0026854321244052645,
+      "std": 0.08714647635685852,
+      "minimum": -0.2797368867510298,
+      "p05": -0.14687062151241972,
+      "median": -0.003510514302269299,
+      "p95": 0.14600862280415802,
+      "maximum": 0.2819058466307561,
+      "unique_values": 1346,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "StarterComponentLoose",
+      "mean": -0.008852067002791047,
+      "std": 0.22521133205375662,
+      "minimum": -0.7185383896363743,
+      "p05": -0.36847776726518044,
+      "median": -0.009073935076223089,
+      "p95": 0.36666312992474087,
+      "maximum": 0.6895805769391433,
+      "unique_values": 1364,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "StarterWorkload",
+      "mean": -0.007308991225484413,
+      "std": 0.20703280137668068,
+      "minimum": -0.6185088914198268,
+      "p05": -0.338939550916843,
+      "median": -0.012830114504653926,
+      "p95": 0.33678728453219436,
+      "maximum": 0.709838368911195,
+      "unique_values": 1364,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "ParkInteraction",
+      "mean": 0.00364950117664895,
+      "std": 0.0381895655724041,
+      "minimum": -0.3618149953245212,
+      "p05": -0.03499289400252121,
+      "median": 0.0005985725806212281,
+      "p95": 0.05513369122807214,
+      "maximum": 0.18300873210884425,
+      "unique_values": 1264,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "ParkNeutralBase",
+      "mean": 0.1652924156323928,
+      "std": 0.3791521853472246,
+      "minimum": -1.0291251711301264,
+      "p05": -0.4851298716637996,
+      "median": 0.1655296427847734,
+      "p95": 0.8123586018713238,
+      "maximum": 1.4663926379067227,
+      "unique_values": 1364,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "StarterKRate",
+      "mean": -0.0007075086377671963,
+      "std": 0.05162341508771213,
+      "minimum": -0.17222137400152793,
+      "p05": -0.08374376372757592,
+      "median": -0.001402650026192373,
+      "p95": 0.08595406176080428,
+      "maximum": 0.1664230421757603,
+      "unique_values": 1364,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "StarterBBRate",
+      "mean": 0.00010644856880877349,
+      "std": 0.027881254467119993,
+      "minimum": -0.0950368011935176,
+      "p05": -0.04446282283360234,
+      "median": -0.0006052206246273742,
+      "p95": 0.045540675643114883,
+      "maximum": 0.09074025011932899,
+      "unique_values": 1364,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "StarterHRRate",
+      "mean": -0.000485583200446953,
+      "std": 0.010624359563729154,
+      "minimum": -0.03101074479420943,
+      "p05": -0.018039298332634297,
+      "median": -0.0004740298123608686,
+      "p95": 0.016500788347210242,
+      "maximum": 0.034065525120287946,
+      "unique_values": 1364,
+      "near_constant": false,
+      "coefficient": null
+    },
+    {
+      "name": "BaseRuns",
+      "mean": 0.1667131678219745,
+      "std": 0.3808475277797799,
+      "minimum": -1.2625553105217509,
+      "p05": -0.48615237494341923,
+      "median": 0.1740036284532292,
+      "p95": 0.8050362886165126,
+      "maximum": 1.5211094882813914,
+      "unique_values": 1355,
+      "near_constant": false,
+      "coefficient": null
+    }
+  ],
+  "calibration_comparison": [
+    {
+      "method": "identity",
+      "selected": false,
+      "validation_brier": 0.2439365356300912,
+      "target_accuracy": 0.5469208211143695,
+      "target_brier": 0.248118078623719,
+      "target_log_loss": 0.6894260938747336
+    },
+    {
+      "method": "isotonic",
+      "selected": true,
+      "validation_brier": 0.24121274253269262,
+      "target_accuracy": 0.5425219941348973,
+      "target_brier": 0.2484707030672306,
+      "target_log_loss": 0.6908580021474725
+    },
+    {
+      "method": "platt",
+      "selected": false,
+      "validation_brier": 0.2436358694277597,
+      "target_accuracy": 0.5498533724340176,
+      "target_brier": 0.2481892360309593,
+      "target_log_loss": 0.6895607466586303
+    },
+    {
+      "method": "shrink10",
+      "selected": false,
+      "validation_brier": 0.24386761549672079,
+      "target_accuracy": 0.5469208211143695,
+      "target_brier": 0.24774181903301748,
+      "target_log_loss": 0.6886272066898887
+    },
+    {
+      "method": "shrink20",
+      "selected": false,
+      "validation_brier": 0.24394875460120857,
+      "target_accuracy": 0.5469208211143695,
+      "target_brier": 0.2474909931597224,
+      "target_log_loss": 0.6881028755441908
+    },
+    {
+      "method": "shrink30",
+      "selected": false,
+      "validation_brier": 0.24417995294355502,
+      "target_accuracy": 0.5469208211143695,
+      "target_brier": 0.24736560100383426,
+      "target_log_loss": 0.687845205298687
+    },
+    {
+      "method": "shrink40",
+      "selected": false,
+      "validation_brier": 0.24456121052375862,
+      "target_accuracy": 0.5469208211143695,
+      "target_brier": 0.2473656425653522,
+      "target_log_loss": 0.687847935128575
+    }
+  ],
+  "training_seasons": [
+    2024
+  ],
+  "calibration_seasons": [
+    2024,
+    2025
+  ],
+  "tournament_models": [
+    {
+      "key": "logistic",
+      "label": "Regularized logistic",
+      "family": "Linear",
+      "selected": true,
+      "promoted": false,
+      "validation_brier_mean": 0.24310142714720137,
+      "validation_log_loss_mean": 0.6790943848665272,
+      "fold_briers": [
+        0.2425666898656881,
+        0.24363616442871464
+      ],
+      "fold_log_losses": [
+        0.6780764664960358,
+        0.6801123032370185
+      ],
+      "target_accuracy": 0.5498533724340176,
+      "target_brier": 0.2481875338417597,
+      "target_log_loss": 0.6895572275134049,
+      "prediction_count": 1364,
+      "calibration_method": "platt",
+      "blend_weights": []
+    },
+    {
+      "key": "boosted_tree",
+      "label": "Boosted decision trees",
+      "family": "HistGradientBoosting",
+      "selected": false,
+      "promoted": false,
+      "validation_brier_mean": 0.24621993136849388,
+      "validation_log_loss_mean": 0.685515343697719,
+      "fold_briers": [
+        0.24571826515094589,
+        0.24672159758604187
+      ],
+      "fold_log_losses": [
+        0.6845099990210023,
+        0.6865206883744357
+      ],
+      "target_accuracy": 0.531524926686217,
+      "target_brier": 0.24810824790195016,
+      "target_log_loss": 0.6893402661052357,
+      "prediction_count": 1364,
+      "calibration_method": "platt",
+      "blend_weights": []
+    },
+    {
+      "key": "expected_runs",
+      "label": "Expected runs (Poisson)",
+      "family": "Poisson run model",
+      "selected": false,
+      "promoted": false,
+      "validation_brier_mean": 0.24554074578836624,
+      "validation_log_loss_mean": 0.6841391808312798,
+      "fold_briers": [
+        0.2457689283451086,
+        0.24531256323162387
+      ],
+      "fold_log_losses": [
+        0.6846379059974419,
+        0.6836404556651176
+      ],
+      "target_accuracy": 0.5476539589442815,
+      "target_brier": 0.24821236316437478,
+      "target_log_loss": 0.6896134748530243,
+      "prediction_count": 1364,
+      "calibration_method": "platt",
+      "blend_weights": []
+    },
+    {
+      "key": "ensemble",
+      "label": "Validation-selected ensemble",
+      "family": "Blend",
+      "selected": false,
+      "promoted": false,
+      "validation_brier_mean": 0.24339626682693882,
+      "validation_log_loss_mean": 0.6797345618427595,
+      "fold_briers": [
+        0.2428743998272341,
+        0.24391813382664354
+      ],
+      "fold_log_losses": [
+        0.6787188199766107,
+        0.6807503037089083
+      ],
+      "target_accuracy": 0.5476539589442815,
+      "target_brier": 0.24780754325959237,
+      "target_log_loss": 0.688758884386595,
+      "prediction_count": 1364,
+      "calibration_method": "component-calibrated blend",
+      "blend_weights": [
+        0.7,
+        0.2,
+        0.1
+      ]
+    }
+  ],
+  "tournament_champion": "Regularized logistic",
+  "tournament_decision": "No challenger cleared the multi-fold Brier, log-loss, and stability gates; retained logistic.",
+  "tournament_promoted": false,
+  "tournament_selection_folds": [
+    2024,
+    2025
+  ],
+  "leakage_audit": {
+    "chronological_order": true,
+    "prediction_before_result_update": true,
+    "current_game_excluded": true,
+    "prior_season_only_for_priors": true,
+    "calibrator_uses_past_only": true,
+    "coefficients_trained_before_target_season": true,
+    "rolling_features_shifted": true,
+    "passed": true,
+    "note": "Each prediction is created before the current final score is added. Priors use the previous season, component starter and reliever features use prior games only, and v0.12 challengers are trained and selected before the target season."
+  },
+  "methodology": "Leakage-safe comparison of v0.4, v0.5, linear v0.9 features, and v0.12 model-family challengers trained before the target season using chronological validation, calibration, and a guarded champion/challenger promotion rule"
+}

@@ -33,6 +33,7 @@ from .mlb import (
 )
 from .polymarket import GAMMA_BASE_URL, fetch_order_book_tops
 from .prop_decision import MarketContract, choose_best_contract
+from .runtime import runtime_cache_dir
 from .schemas import (
     PropBoardResponse,
     PropContractEvaluation,
@@ -295,8 +296,8 @@ async def fetch_active_strikeout_markets(
 class MlbPlayerDirectory:
     """Point-in-time MLB player-name directory with a persistent local cache."""
 
-    def __init__(self, *, cache_dir: Path = Path("data/player_cache")) -> None:
-        self.cache_dir = cache_dir
+    def __init__(self, *, cache_dir: Path | None = None) -> None:
+        self.cache_dir = cache_dir or runtime_cache_dir("player_cache")
         self._players: dict[str, PlayerIdentity] = {}
 
     def _cache_path(self, season: int) -> Path:
@@ -348,8 +349,13 @@ class MlbPlayerDirectory:
         if not isinstance(payload, dict):
             raise PlayerPropError("MLB player directory had an unexpected shape")
         self._load_payload(payload)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+        except OSError:
+            # Caching is an optimization only. The Vercel bundle is read-only,
+            # and even /tmp can occasionally be unavailable during teardown.
+            pass
 
     def resolve(self, name: str, *, minimum_score: float = 94.0) -> PlayerIdentity:
         normalized = normalize_person_name(name)

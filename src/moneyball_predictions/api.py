@@ -36,6 +36,8 @@ from .dashboard_api import router as dashboard_router
 from .cron_api import router as cron_router
 from .db import PLAYER_PROP_ACCOUNT, database_health, ensure_database_initialized, session_scope
 from .portfolio import account_metrics
+from .runtime import running_on_vercel
+from .serverless_artifacts import load_backtest_snapshot
 from .repositories import (
     insert_lineup_snapshot as insert_postgres_lineup_snapshot,
     insert_prop_family_decisions,
@@ -140,6 +142,23 @@ async def mlb_backtest(
     min_games: int = Query(default=10, ge=1, le=40),
 ) -> BacktestResponse:
     response.headers["Vercel-CDN-Cache-Control"] = "public, s-maxage=3600, stale-while-revalidate=86400"
+    if running_on_vercel():
+        if through is not None or min_games != 10:
+            raise HTTPException(
+                status_code=422,
+                detail="Custom Model Lab runs are local-only; deploy a precomputed default snapshot.",
+            )
+        snapshot = load_backtest_snapshot(season)
+        if snapshot is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Model Lab snapshot is missing. Run "
+                    "python scripts/export_serverless_artifacts.py --season "
+                    f"{season}, then commit the generated artifacts."
+                ),
+            )
+        return snapshot
     try:
         return await build_mlb_backtest(
             season=season,
