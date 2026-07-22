@@ -1,16 +1,32 @@
-import pytest
+import base64
+import os
 
+import pytest
 from fastapi.testclient import TestClient
 
 from moneyball_predictions.api import app
 
-client = TestClient(app)
+
+def _dashboard_auth_headers() -> dict[str, str]:
+    """Authenticate test requests when the local private-dashboard setting is active."""
+    password = os.environ.get("DASHBOARD_PASSWORD", "")
+    if not password:
+        return {}
+    username = os.environ.get("DASHBOARD_USERNAME", "moneyball")
+    token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {token}"}
+
+
+client = TestClient(app, headers=_dashboard_auth_headers())
 
 
 def test_health_endpoint() -> None:
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["version"] == "0.13.0"
+    assert payload["database"]["status"] == "ok"
 
 
 def test_prediction_endpoint_returns_two_sides() -> None:

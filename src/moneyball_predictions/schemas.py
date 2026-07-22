@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -117,9 +117,9 @@ class LiveGamePrediction(BaseModel):
     recommendation_reason: str
     liquidity: float | None = None
     volume: float | None = None
-    model_version: str = "v0.12.2"
+    model_version: str = "v0.13.0"
     methodology: str = (
-        "v0.12.2 confirmed-lineup gate using immutable lineup snapshots, conservative lineup-specific offense repricing, and the guarded v0.10 model tournament"
+        "v0.13.0 confirmed-lineup gate using immutable lineup snapshots, conservative lineup-specific offense repricing, and the guarded v0.10 model tournament"
     )
 
 
@@ -205,7 +205,7 @@ class MatchingDiagnostics(BaseModel):
 class LiveMlbResponse(BaseModel):
     generated_at: datetime
     season: int
-    model_version: str = "v0.12.2"
+    model_version: str = "v0.13.0"
     model_training_rows: int = 0
     model_validation_rows: int = 0
     bankroll: float
@@ -472,16 +472,95 @@ class StrikeoutPropPrediction(BaseModel):
     polymarket_url: str
     volume: float | None = None
     liquidity: float | None = None
-    model_version: str = "v0.12.2-poisson-k"
+    model_version: str = "v0.13.0-poisson-k"
+
+
+class PropContractEvaluation(BaseModel):
+    market_id: str
+    token_id: str
+    threshold: int = Field(ge=1)
+    side: Literal["YES", "NO"]
+    raw_probability: float = Field(ge=0, le=1)
+    conservative_probability: float = Field(ge=0, le=1)
+    executable_price: float | None = Field(default=None, ge=0, le=1)
+    edge: float | None = None
+    expected_roi: float | None = None
+    full_kelly_fraction: float = Field(default=0, ge=0)
+    selected_kelly_fraction: float = Field(default=0, ge=0)
+    proposed_stake: float = Field(default=0, ge=0)
+    expected_log_growth: float | None = None
+    fully_fillable: bool = False
+    levels_consumed: int = 0
+    decision: Literal["BEST_BET", "ALTERNATIVE", "LEAN", "PASS", "WARNING"] = "PASS"
+    polymarket_url: str
+
+
+class StrikeoutPropFamily(BaseModel):
+    family_key: str
+    player_id: int
+    player_name: str
+    game_pk: int
+    opponent: str
+    start_time: str
+    projected_innings: float = Field(ge=0)
+    expected_batters_faced: float = Field(ge=0)
+    pitcher_k_rate: float = Field(ge=0, le=1)
+    opponent_lineup_k_rate: float = Field(ge=0, le=1)
+    matchup_k_rate: float = Field(ge=0, le=1)
+    expected_strikeouts: float = Field(ge=0)
+    lineup_status: Literal["CONFIRMED", "LEAGUE_FALLBACK"]
+    hitters_used: int = 0
+    shrinkage: float = Field(ge=0, le=1)
+    shrinkage_source: str
+    warning_code: str | None = None
+    warning_message: str | None = None
+    best_market_id: str | None = None
+    best_side: Literal["YES", "NO"] | None = None
+    best_threshold: int | None = None
+    contracts: list[PropContractEvaluation] = Field(default_factory=list)
+    model_version: str
 
 
 class PropBoardResponse(BaseModel):
     generated_at: datetime
     season: int
     stake_dollars: float = Field(gt=0)
+    available_bankroll: float = Field(default=100, ge=0)
     model_version: str
-    props: list[StrikeoutPropPrediction]
+    props: list[StrikeoutPropPrediction] = Field(default_factory=list)
+    families: list[StrikeoutPropFamily] = Field(default_factory=list)
     diagnostics: dict[str, int] = Field(default_factory=dict)
+
+
+class PaperBetPlacementRequest(BaseModel):
+    account_type: Literal["MONEYLINE", "PLAYER_PROP"]
+    market_type: Literal["MONEYLINE", "STRIKEOUT_PROP"]
+    game_pk: int = Field(gt=0)
+    market_id: str = Field(min_length=1)
+    token_id: str | None = None
+    selection: str = Field(min_length=1)
+    team: str | None = None
+    opponent: str | None = None
+    player_id: int | None = None
+    player_name: str | None = None
+    prop_threshold: int | None = Field(default=None, ge=1)
+    prop_side: Literal["YES", "NO"] | None = None
+    model_version: str = Field(min_length=1)
+    model_probability: float = Field(ge=0, le=1)
+    entry_price: float = Field(gt=0, lt=1)
+    entry_edge: float
+    expected_roi: float | None = None
+    stake: float = Field(ge=0.01)
+    placed_at: datetime | None = None
+    start_time: datetime | None = None
+    polymarket_url: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class LegacyPaperImportRequest(BaseModel):
+    startingBankroll: float | None = None
+    cash: float | None = None
+    bets: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class PropSettlementResponse(BaseModel):

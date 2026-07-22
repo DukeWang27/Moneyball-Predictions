@@ -32,14 +32,17 @@ from .mlb import (
     fetch_mlb_schedule,
 )
 from .polymarket import GAMMA_BASE_URL, fetch_order_book_tops
+from .prop_decision import MarketContract, choose_best_contract
 from .schemas import (
     PropBoardResponse,
+    PropContractEvaluation,
     PropSettlementResponse,
     PropSideQuote,
+    StrikeoutPropFamily,
     StrikeoutPropPrediction,
 )
 
-MODEL_VERSION = "v0.12.2-poisson-k"
+MODEL_VERSION = "v0.13.0-poisson-k-family"
 EASTERN = ZoneInfo("America/New_York")
 LEAGUE_K_RATE = 0.225
 LEAGUE_REACH_RATE = 0.315
@@ -615,11 +618,13 @@ async def _enrich_upcoming_lineups(
 
 async def build_strikeout_prop_board(
     *,
-    stake_dollars: float = 50.0,
+    stake_dollars: float = 1.0,
+    available_bankroll: float = 100.0,
+    shrinkage: float = 0.30,
     season: int | None = None,
     days: int = 3,
 ) -> PropBoardResponse:
-    """Build a read-only, slippage-adjusted pitcher strikeout prop board."""
+    """Build grouped strikeout families and choose one best contract per pitcher."""
     now = datetime.now(UTC)
     resolved_season = season or now.year
     start_date = now.astimezone(EASTERN).date()
@@ -635,7 +640,7 @@ async def build_strikeout_prop_board(
         "skipped_started": 0,
     }
     timeout = httpx.Timeout(45.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.12.2 prop-research"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.13.0 prop-research"}
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
             markets, schedule = await asyncio.gather(
@@ -648,8 +653,10 @@ async def build_strikeout_prop_board(
                     generated_at=now,
                     season=resolved_season,
                     stake_dollars=stake_dollars,
+                    available_bankroll=available_bankroll,
                     model_version=MODEL_VERSION,
                     props=[],
+                    families=[],
                     diagnostics=diagnostics,
                 )
             schedule = await _enrich_upcoming_lineups(client, schedule)
@@ -684,6 +691,7 @@ async def build_strikeout_prop_board(
             ]
             books = await fetch_order_book_tops(client, token_ids)
             predictions: list[StrikeoutPropPrediction] = []
+            family_inputs: dict[tuple[int, int], dict[str, Any]] = {}
             for market, identity, game, side in mapped:
                 yes_book = books.get(market.yes_token_id)
                 no_book = books.get(market.no_token_id)
@@ -751,10 +759,118 @@ async def build_strikeout_prop_board(
                         model_version=MODEL_VERSION,
                     )
                 )
+                family_key = (game.game_pk, identity.player_id)
+                family = family_inputs.setdefault(
+                    family_key,
+                    {
+                        "player_id": identity.player_id,
+                        "player_name": identity.full_name,
+                        "game_pk": game.game_pk,
+                        "opponent": opponent,
+                        "start_time": game.game_date,
+                        "projected_innings": pitcher.projected_innings,
+                        "expected_batters_faced": expected_bf,
+                        "pitcher_k_rate": pitcher.k_rate,
+                        "opponent_lineup_k_rate": lineup.k_rate,
+                        "matchup_k_rate": matchup_k,
+                        "expected_strikeouts": expected_k,
+                        "lineup_status": "CONFIRMED" if lineup.confirmed else "LEAGUE_FALLBACK",
+                        "hitters_used": lineup.hitters_used,
+                        "contracts": [],
+                    },
+                )
+                family["contracts"].extend(
+                    [
+                        MarketContract(
+                            market_id=market.market_id,
+                            threshold=market.threshold,
+                            side="YES",
+                            token_id=market.yes_token_id,
+                            asks=yes_book.asks,
+                            polymarket_url=market.polymarket_url,
+                        ),
+                        MarketContract(
+                            market_id=market.market_id,
+                            threshold=market.threshold,
+                            side="NO",
+                            token_id=market.no_token_id,
+                            asks=no_book.asks,
+                            polymarket_url=market.polymarket_url,
+                        ),
+                    ]
+                )
                 diagnostics["priced_markets"] += 1
     except (httpx.HTTPError, OSError, ValueError, TypeError) as exc:
         raise PlayerPropError(str(exc)) from exc
 
+    families: list[StrikeoutPropFamily] = []
+    selected_by_market: dict[str, str] = {}
+    for (game_pk, player_id), payload in family_inputs.items():
+        decision = choose_best_contract(
+            payload["contracts"],
+            expected_strikeouts=payload["expected_strikeouts"],
+            bankroll=max(available_bankroll, 0.0),
+            shrinkage=shrinkage,
+            lineup_confirmed=payload["lineup_status"] == "CONFIRMED",
+        )
+        if decision.best_market_id and decision.best_side:
+            selected_by_market[decision.best_market_id] = decision.best_side
+        families.append(
+            StrikeoutPropFamily(
+                family_key=f"{game_pk}:{player_id}:PITCHER_STRIKEOUTS",
+                player_id=player_id,
+                player_name=payload["player_name"],
+                game_pk=game_pk,
+                opponent=payload["opponent"],
+                start_time=payload["start_time"],
+                projected_innings=payload["projected_innings"],
+                expected_batters_faced=payload["expected_batters_faced"],
+                pitcher_k_rate=payload["pitcher_k_rate"],
+                opponent_lineup_k_rate=payload["opponent_lineup_k_rate"],
+                matchup_k_rate=payload["matchup_k_rate"],
+                expected_strikeouts=payload["expected_strikeouts"],
+                lineup_status=payload["lineup_status"],
+                hitters_used=payload["hitters_used"],
+                shrinkage=shrinkage,
+                shrinkage_source="default_30_pct_until_historical_calibration",
+                warning_code=decision.warning_code,
+                warning_message=decision.warning_message,
+                best_market_id=decision.best_market_id,
+                best_side=decision.best_side,
+                best_threshold=decision.best_threshold,
+                contracts=[
+                    PropContractEvaluation(**evaluation.__dict__)
+                    for evaluation in decision.evaluations
+                ],
+                model_version=MODEL_VERSION,
+            )
+        )
+
+    # Preserve the old flat list for API compatibility, but only the selected
+    # contract in each family may be a BET.
+    normalized_predictions: list[StrikeoutPropPrediction] = []
+    for prop in predictions:
+        best_side = selected_by_market.get(prop.market_id)
+        if best_side:
+            normalized_predictions.append(
+                prop.model_copy(update={"signal": "BET", "recommended_side": best_side})
+            )
+        else:
+            candidates = [quote for quote in (prop.yes, prop.no) if quote.edge is not None]
+            positive = max(candidates, key=lambda item: item.edge or -1, default=None)
+            normalized_predictions.append(
+                prop.model_copy(
+                    update={
+                        "signal": "LEAN" if positive and (positive.edge or 0) > 0 else "PASS",
+                        "recommended_side": positive.side if positive and (positive.edge or 0) > 0 else None,
+                    }
+                )
+            )
+    predictions = normalized_predictions
+    family_rank = lambda family: max(
+        (item.expected_log_growth or -1e9) for item in family.contracts
+    )
+    families.sort(key=family_rank, reverse=True)
     signal_rank = {"BET": 2, "LEAN": 1, "PASS": 0}
     predictions.sort(
         key=lambda prop: (
@@ -766,11 +882,14 @@ async def build_strikeout_prop_board(
     return PropBoardResponse(
         generated_at=now,
         season=resolved_season,
-        stake_dollars=stake_dollars,
+        stake_dollars=max(stake_dollars, 0.01),
+        available_bankroll=max(available_bankroll, 0.0),
         model_version=MODEL_VERSION,
         props=predictions,
+        families=families,
         diagnostics=diagnostics,
     )
+
 
 
 def settle_strikeout_selection(
@@ -797,7 +916,7 @@ async def build_strikeout_prop_settlement(
 ) -> PropSettlementResponse:
     """Grade one browser paper prop from the official MLB game box score."""
     timeout = httpx.Timeout(20.0, connect=8.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.12.2 prop-settlement"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.13.0 prop-settlement"}
     try:
         async with httpx.AsyncClient(
             timeout=timeout,

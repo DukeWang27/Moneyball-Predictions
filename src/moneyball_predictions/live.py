@@ -542,7 +542,7 @@ def _archive_immutable_horizon_prediction(
             horizon=horizon,
             as_of=frozen_as_of,
             model_version=model_version,
-            feature_schema_version="v0.12.2",
+            feature_schema_version="v0.13.0",
             code_commit_sha=os.environ.get("MONEYBALL_CODE_COMMIT", "unknown"),
             model_artifact_sha256=sha256_json(artifact_payload),
             calibration_artifact_sha256=None,
@@ -566,14 +566,14 @@ async def build_live_mlb_predictions(
     season: int | None = None,
     days: int = 2,
 ) -> LiveMlbResponse:
-    """Fetch MLB scores and price upcoming games with the v0.12.2 lineup-gated tournament or its explicit v0.7 fallback."""
+    """Fetch MLB scores and price upcoming games with the v0.13.0 lineup-gated tournament or its explicit v0.7 fallback."""
     now = datetime.now(UTC)
     now_eastern = now.astimezone(EASTERN)
     resolved_season = season or now_eastern.year
     start_date = now_eastern.date()
     end_date = start_date + timedelta(days=max(days, 1) - 1)
     timeout = httpx.Timeout(90.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.12.2 lineup-gated-dashboard"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.13.0 lineup-gated-dashboard"}
     runtime_counts: Counter[str] = Counter()
     optimized_context: LiveOptimizedContext | None = None
 
@@ -658,7 +658,7 @@ async def build_live_mlb_predictions(
     lineup_client = httpx.AsyncClient(
         timeout=httpx.Timeout(30.0, connect=8.0),
         follow_redirects=True,
-        headers={"User-Agent": "Moneyball-Predictions/0.12.2 lineup-offense"},
+        headers={"User-Agent": "Moneyball-Predictions/0.13.0 lineup-offense"},
     )
     prior_values = list(prior_team_stats.values())
     prior_games_total = sum(item.games_played for item in prior_values)
@@ -786,7 +786,7 @@ async def build_live_mlb_predictions(
                     else 1.0 - home_probability
                 )
                 model_version = (
-                    f"v0.12.2 {selected_label} ({selected_calibration})"
+                    f"v0.13.0 {selected_label} ({selected_calibration})"
                     if component_ready
                     else "v0.7 proxy · run pitching sync"
                 )
@@ -1147,7 +1147,7 @@ async def build_live_mlb_predictions(
         season=resolved_season,
         model_version=(
             (
-                f"v0.12.2 {optimized_context.artifact.champion.label} "
+                f"v0.13.0 {optimized_context.artifact.champion.label} "
                 f"({optimized_context.artifact.champion.calibration_method})"
                 if optimized_context.artifact.linear_artifact is not None
                 and optimized_context.artifact.linear_artifact.validation_component_coverage
@@ -1174,7 +1174,7 @@ async def build_live_mlb_predictions(
 async def build_single_scoreboard_game(game_pk: int) -> ScoreboardGame:
     """Fetch one game for resolving a locally stored paper bet."""
     timeout = httpx.Timeout(15.0, connect=8.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.12.2 paper-settlement"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.13.0 paper-settlement"}
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             game = await fetch_mlb_game(client, game_pk)

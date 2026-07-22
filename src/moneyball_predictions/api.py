@@ -5,10 +5,13 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
+import base64
+import hmac
+import os
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .backtest import BacktestError, build_mlb_backtest
@@ -28,7 +31,15 @@ from .player_props import (
     build_strikeout_prop_settlement,
 )
 from .research_api import router as research_router
-from .storage import insert_lineup_snapshot
+from .portfolio_api import router as portfolio_router
+from .dashboard_api import router as dashboard_router
+from .cron_api import router as cron_router
+from .db import PLAYER_PROP_ACCOUNT, database_health, ensure_database_initialized, session_scope
+from .portfolio import account_metrics
+from .repositories import (
+    insert_lineup_snapshot as insert_postgres_lineup_snapshot,
+    insert_prop_family_decisions,
+)
 from .schemas import (
     BacktestResponse,
     EdgePerformanceResponse,
@@ -48,25 +59,68 @@ STATIC_DIR = PACKAGE_DIR / "static"
 
 app = FastAPI(
     title="Moneyball Predictions API",
-    version="0.12.2",
+    version="0.13.0",
     description="MLB moneylines, pitcher props, paper trading, execution research, and leakage-safe model comparison.",
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 app.include_router(research_router)
+app.include_router(portfolio_router)
+app.include_router(dashboard_router)
+app.include_router(cron_router)
+
+
+@app.middleware("http")
+async def optional_private_dashboard(request: Request, call_next):
+    """Use browser-native Basic Auth when DASHBOARD_PASSWORD is configured."""
+    password = os.environ.get("DASHBOARD_PASSWORD", "")
+    if not password or request.url.path == "/health" or request.url.path.startswith("/api/internal/cron/"):
+        return await call_next(request)
+    username = os.environ.get("DASHBOARD_USERNAME", "moneyball")
+    header = request.headers.get("authorization", "")
+    supplied_user = supplied_password = ""
+    if header.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(header[6:]).decode("utf-8")
+            supplied_user, supplied_password = decoded.split(":", 1)
+        except (ValueError, UnicodeDecodeError):
+            pass
+    if not (
+        hmac.compare_digest(supplied_user, username)
+        and hmac.compare_digest(supplied_password, password)
+    ):
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Authentication required"},
+            headers={"WWW-Authenticate": 'Basic realm="Moneyball Predictions"'},
+        )
+    response = await call_next(request)
+    existing_vary = response.headers.get("Vary", "")
+    vary_values = {value.strip() for value in existing_vary.split(",") if value.strip()}
+    vary_values.add("Authorization")
+    response.headers["Vary"] = ", ".join(sorted(vary_values))
+    return response
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict:
+    try:
+        ensure_database_initialized()
+        database = database_health()
+    except Exception as exc:
+        database = {"status": "error", "detail": str(exc)}
+    return {"status": "ok", "version": "0.13.0", "database": database}
 
 
 @app.get("/api/v1/polymarket/mlb", response_model=LiveMlbResponse)
 async def live_mlb_markets(
+    response: Response,
     bankroll: float = Query(default=100.0, gt=0, le=1_000_000),
     kelly_multiplier: float = Query(default=0.25, gt=0, le=1.0),
     season: int | None = Query(default=None, ge=2000, le=2100),
     days: int = Query(default=2, ge=1, le=7),
 ) -> LiveMlbResponse:
+    response.headers["Cache-Control"] = "public, max-age=5"
+    response.headers["Vercel-CDN-Cache-Control"] = "public, s-maxage=15, stale-while-revalidate=30"
     try:
         return await build_live_mlb_predictions(
             bankroll=bankroll,
@@ -80,10 +134,12 @@ async def live_mlb_markets(
 
 @app.get("/api/v1/backtest/mlb", response_model=BacktestResponse)
 async def mlb_backtest(
+    response: Response,
     season: int = Query(default=2026, ge=2000, le=2100),
     through: date | None = Query(default=None),
     min_games: int = Query(default=10, ge=1, le=40),
 ) -> BacktestResponse:
+    response.headers["Vercel-CDN-Cache-Control"] = "public, s-maxage=3600, stale-while-revalidate=86400"
     try:
         return await build_mlb_backtest(
             season=season,
@@ -96,16 +152,25 @@ async def mlb_backtest(
 
 @app.get("/api/v1/props/strikeouts", response_model=PropBoardResponse)
 async def mlb_strikeout_props(
-    stake_dollars: float = Query(default=50.0, gt=0, le=100_000),
+    response: Response,
     season: int | None = Query(default=None, ge=2000, le=2100),
     days: int = Query(default=3, ge=1, le=7),
 ) -> PropBoardResponse:
+    ensure_database_initialized()
+    with session_scope() as session:
+        bankroll = account_metrics(session, PLAYER_PROP_ACCOUNT).available_cash
+    response.headers["Cache-Control"] = "private, max-age=5"
     try:
-        return await build_strikeout_prop_board(
-            stake_dollars=stake_dollars,
+        board = await build_strikeout_prop_board(
+            stake_dollars=max(0.01, bankroll * 0.01),
+            available_bankroll=bankroll,
+            shrinkage=0.30,
             season=season,
             days=days,
         )
+        with session_scope() as session:
+            insert_prop_family_decisions(session, board)
+        return board
     except PlayerPropError as exc:
         raise HTTPException(status_code=502, detail=f"Player-prop refresh failed: {exc}") from exc
 
@@ -136,8 +201,10 @@ async def mlb_strikeout_prop_settlement(
 
 @app.get("/api/v1/edge-performance/mlb", response_model=EdgePerformanceResponse)
 async def mlb_edge_performance(
+    response: Response,
     entry_horizon_minutes: int = Query(default=60, ge=15, le=1440),
 ) -> EdgePerformanceResponse:
+    response.headers["Vercel-CDN-Cache-Control"] = "public, s-maxage=300, stale-while-revalidate=600"
     try:
         return await build_edge_performance(
             entry_horizon_minutes=entry_horizon_minutes,
@@ -157,7 +224,7 @@ async def mlb_game_lineups(game_pk: int) -> GameLineupsResponse:
         async with httpx.AsyncClient(
             timeout=timeout,
             follow_redirects=True,
-            headers={"User-Agent": "Moneyball-Predictions/0.12.2 lineup-status"},
+            headers={"User-Agent": "Moneyball-Predictions/0.13.0 lineup-status"},
         ) as client:
             response = await client.get(f"{MLB_STATS_BASE_URL}/game/{game_pk}/boxscore")
             response.raise_for_status()
@@ -169,8 +236,10 @@ async def mlb_game_lineups(game_pk: int) -> GameLineupsResponse:
     except (httpx.HTTPError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=502, detail=f"MLB lineup refresh failed: {exc}") from exc
 
-    insert_lineup_snapshot(lineups.away)
-    insert_lineup_snapshot(lineups.home)
+    ensure_database_initialized()
+    with session_scope() as session:
+        insert_postgres_lineup_snapshot(session, lineups.away)
+        insert_postgres_lineup_snapshot(session, lineups.home)
 
     def team_payload(lineup) -> TeamLineupResponse:
         return TeamLineupResponse(

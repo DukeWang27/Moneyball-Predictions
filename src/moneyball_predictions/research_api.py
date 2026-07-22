@@ -108,7 +108,7 @@ class ImmutablePredictionRequest(BaseModel):
     horizon: Literal["T24H", "T1H", "MANUAL"]
     as_of: datetime
     model_version: str
-    feature_schema_version: str = "v0.12.2"
+    feature_schema_version: str = "v0.13.0"
     code_commit_sha: str = "unknown"
     model_artifact_sha256: str = "unavailable"
     calibration_artifact_sha256: str | None = None

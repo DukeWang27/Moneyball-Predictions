@@ -157,7 +157,7 @@ def _candidate_rows(
 ) -> list[EdgePerformanceBet]:
     candidates: list[EdgePerformanceBet] = []
     for entry, close in snapshots:
-        # v0.12.2+ stores early lineup-pending quotes for observation, but they are
+        # v0.13.0+ stores early lineup-pending quotes for observation, but they are
         # not actionable strategy entries.  Older snapshots have no lineup fields
         # and remain available for legacy research.
         if "lineup_status" in entry and (
@@ -310,7 +310,7 @@ def analyze_archived_snapshots(
             "Economic edge is model probability minus the executable ask. Sabermetric "
             "confirmation is a filter requiring independent team-strength and pitching/park "
             "drivers to agree; it is not added to the probability a second time. Results cover "
-            "only snapshots this app actually archived before first pitch. v0.12.2+ WAIT "
+            "only snapshots this app actually archived before first pitch. v0.13.0+ WAIT "
             "snapshots are excluded until both official lineups were confirmed and repriced."
         ),
     )
@@ -339,7 +339,7 @@ async def build_edge_performance(
     start_date = min(dates)
     end_date = max(max(dates), date.today())
     timeout = httpx.Timeout(90.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.12.2 edge-performance"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.13.0 edge-performance"}
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             schedule = await fetch_mlb_schedule(client, start_date, end_date)

@@ -1,123 +1,145 @@
-# Moneyball Predictions v0.12.2
+# Moneyball Predictions v0.13.0
 
-Local FastAPI application for MLB pregame forecasting, Polymarket moneyline and pitcher-prop research, browser paper trading, archived edge/CLV analysis, and deterministic model experimentation.
+MLB moneyline and pitcher-strikeout research dashboard built with FastAPI, vanilla JavaScript, Polymarket market data, MLB data, and Postgres-backed paper trading.
 
-## v0.12.2 confirmed-lineup process
+## Major changes
 
-Every pregame moneyline now has one standardized lineup state:
+- FastAPI entrypoint for Vercel (`index.py`)
+- Neon/Postgres persistence with SQLAlchemy and Alembic
+- Separate $100 moneyline and $100 player-prop paper ledgers
+- Server-side balance, P&L, accuracy, average edge, and Brier calculations
+- Legacy browser-bet importer
+- Grouped pitcher strikeout families
+- One `BEST_BET` contract per pitcher/game
+- Poisson probability ladders with monotonicity checks
+- YES/NO market ladder validation
+- Conservative 30% probability shrinkage until historical prop calibration is available
+- Expected ROI, Kelly fraction, and expected-log-growth ranking
+- Lazy-loaded tabbed frontend
+- Protected lineup and settlement cron endpoints
+- Postgres market snapshots and lineup snapshots
 
-- `PENDING`: neither official nine-man batting order is available.
-- `PARTIAL`: one lineup or an incomplete lineup is available.
-- `CONFIRMED`: both teams have exactly nine official starters.
-
-The canonical parser accepts only MLB `battingOrder` values `100, 200, ..., 900`. Later substitutions such as `101` or `201` are excluded from the announced starting nine.
-
-Moneyline paper betting is locked until:
-
-1. both probable starters have official MLB IDs;
-2. both official lineups contain nine starters;
-3. lineup-specific offense repricing succeeds; and
-4. the repriced side clears the 5% edge and 5% expected-ROI gates.
-
-Before confirmation, the dashboard still shows the early model probability and market price, but the signal is `WAIT` and no paper-bet button appears.
-
-## Confirmed-lineup repricing
-
-For each hitter, v0.12.2 requests current-season hitting statistics against the opposing starter's handedness when the split is available. It creates a shrunken event-rate projection for unintentional walks, hit-by-pitches, singles, doubles, triples, and home runs, then calculates a lineup xwOBA with batting-order weights.
-
-To avoid double-counting elite teams, the adjustment is based on:
-
-```text
-(home confirmed-lineup xwOBA - home team baseline xwOBA)
--
-(away confirmed-lineup xwOBA - away team baseline xwOBA)
-```
-
-That difference is applied conservatively in log-odds space and capped. This is a transparent T1H overlay, not yet a historically promoted replacement for the v0.10 champion. Its coefficient must be validated with archived point-in-time lineups before being increased.
-
-Optional environment controls:
-
-```bash
-export MONEYBALL_LINEUP_LOGIT_COEFFICIENT=4.0
-export MONEYBALL_LINEUP_LOGIT_CAP=0.20
-```
-
-## Immutable lineup storage
-
-The research database now includes `lineup_snapshots`. A new row is inserted only when a team's lineup hash changes. `PENDING`, `PARTIAL`, `CONFIRMED`, and later lineup changes remain permanently auditable.
-
-## Install
+## Local installation
 
 ```bash
 cd ~/Desktop/baseball/Moneyball-Predictions
-unzip -o ~/Downloads/moneyball-polymarket-v0.12.2.zip -d .
+python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip setuptools wheel
 python -m pip install -e ".[dev]"
-ruff check .
-pytest -q
-```
-
-Expected:
-
-```text
-85 passed
-```
-
-## Initialize or migrate storage
-
-```bash
-python scripts/init_research_db.py
-```
-
-The command preserves existing predictions, market snapshots, paper-bet browser data, and other SQLite records while adding the lineup table.
-
-## Start the server and automatic lineup poller together
-
-```bash
+cp .env.example .env
+python scripts/init_postgres.py
 bash scripts/start_local.sh
 ```
 
-This starts:
+Open `http://127.0.0.1:8000`.
 
-```text
-FastAPI / Uvicorn
-60-second official MLB lineup polling
-immutable lineup snapshot storage
+## Neon variables
+
+Use Neon's pooled connection string for runtime requests:
+
+```env
+DATABASE_URL=postgresql://...-pooler.../neondb?sslmode=require
 ```
 
-Press `Control + C` once to stop both processes.
+Use Neon's direct connection string for migrations:
 
-Open:
-
-```text
-http://127.0.0.1:8000
+```env
+DATABASE_URL_DIRECT=postgresql://......neon.tech/neondb?sslmode=require
 ```
 
-Hard refresh on macOS with `Command + Shift + R`.
-
-The header should say:
-
-```text
-MLB · Polymarket board + confirmed-lineup lab · v0.12.2
-```
-
-## Poll or inspect lineups manually
-
-One polling pass:
+Then run:
 
 ```bash
-python scripts/poll_lineups.py --once
+set -a
+source .env
+set +a
+alembic upgrade head
+python scripts/init_postgres.py
 ```
 
-Inspect one game's current official lineup state:
+## Paper-bet migration
+
+When the app is first run at the same local origin used by v0.12.2, the Overview page detects `moneyballPaperAccountV1` in localStorage and offers an **Import bets** button.
+
+The importer:
+
+- sends moneyline bets to the moneyline ledger
+- sends strikeout props to the prop ledger
+- preserves entry probabilities, prices, edges, statuses, and realized P&L
+- keeps the old browser copy untouched as a backup
+
+## Vercel
+
+The FastAPI application is exported from `index.py`. Add these environment variables to Vercel:
+
+```text
+DATABASE_URL
+DASHBOARD_USERNAME
+DASHBOARD_PASSWORD
+CRON_SECRET
+```
+
+Deploy from the connected GitHub repository. FastAPI is served as one Vercel Function.
+
+## Hobby-plan scheduled jobs
+
+Vercel Hobby cannot run minute-level cron jobs. Use an external HTTP scheduler to call:
+
+```text
+GET /api/internal/cron/lineups
+GET /api/internal/cron/settle-paper-bets
+```
+
+Both require:
+
+```text
+Authorization: Bearer <CRON_SECRET>
+```
+
+The lineup endpoint implements adaptive cadence internally:
+
+- 6–2 hours before first pitch: every 10 minutes
+- 2 hours–15 minutes before first pitch: every 2 minutes
+- final 15 minutes: every minute
+- after first pitch: stop
+
+The external scheduler may call the endpoint every minute; unnecessary game checks are skipped.
+
+## Testing
 
 ```bash
-curl -s http://127.0.0.1:8000/api/v1/mlb/game/GAME_PK/lineups \
-  | python -m json.tool
+pytest -q
 ```
 
-## Important research limitation
+Expected for this package:
 
-Historical final box scores reveal who ultimately started, but they do not by themselves establish when a lineup became publicly available. Forward lineup snapshots created by this release are therefore the trusted source for future T24H-versus-T1H CLV and ROI testing.
+```text
+93 passed
+```
 
-Real-money order submission remains disabled. Paper trading and order-book research remain local.
+## Prop-family selection
+
+Every pitcher/game is represented by one family key:
+
+```text
+(game_pk, player_id, PITCHER_STRIKEOUTS)
+```
+
+All thresholds use the same expected strikeout mean, lambda:
+
+```text
+P(K >= n) = poisson.sf(n - 1, lambda)
+```
+
+The engine evaluates both YES and NO at every available threshold. Only one contract can be selected as `BEST_BET`. Other positive contracts remain visible as alternatives but do not receive a paper-bet button.
+
+Betting is disabled when:
+
+- probabilities are non-monotonic
+- YES prices are materially inverted
+- NO prices are materially inverted
+- the opponent lineup is not confirmed
+- the proposed stake is not fillable
+- edge is below 5%
+- expected ROI is below 5%
