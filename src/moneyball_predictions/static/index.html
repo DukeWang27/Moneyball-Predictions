@@ -66,6 +66,22 @@
     .signal-chip.BET { background: #123120; color: #9af0b5; }
     .signal-chip.LEAN { background: #2d2815; color: #f3d989; }
     .signal-chip.PASS { background: #182130; color: #afbdd0; }
+    .signal-chip.WAIT { background: #251f36; color: #c8abff; }
+    .lineup-state { border: 1px solid #303a4b; border-radius: 10px; padding: 10px 12px; line-height: 1.45; }
+    .lineup-state strong { display: block; font-size: 12px; letter-spacing: .07em; margin-bottom: 3px; }
+    .lineup-state.pending { color: #c8abff; background: #171225; border-color: #4a3a6a; }
+    .lineup-state.partial { color: #f3d989; background: #25200f; border-color: #665b2e; }
+    .lineup-state.confirmed { color: #9af0b5; background: #10241a; border-color: #35664b; }
+    .lineup-details { grid-column: 2 / -1; margin-top: 0; }
+    .lineup-details summary { cursor: pointer; color: #cbd6e5; font-weight: 800; }
+    .lineup-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+    .lineup-card { background: #0a0e14; border: 1px solid #283141; border-radius: 10px; padding: 10px; }
+    .lineup-card h4 { margin: 0 0 8px; }
+    .lineup-card ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 5px; }
+    .lineup-card li { display: grid; grid-template-columns: 20px 30px 1fr 38px; gap: 7px; align-items: center; font-size: 12px; }
+    .lineup-card img { width: 28px; height: 28px; border-radius: 50%; object-fit: cover; background: #17243a; }
+    .lineup-slot, .lineup-position { color: #7f8a9c; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .lineup-metrics { margin-top: 10px; color: #93a3b8; font-size: 12px; line-height: 1.5; }
     .signal-chip.BETTED { background: #17304a; color: #9ed1ff; }
     .bet-placed { border: 1px solid #315d82; border-radius: 9px; padding: 9px; color: #9ed1ff; background: #0d1c2a; font-size: 12px; font-weight: 800; text-align: center; }
     .market-detail { grid-column: 2 / -1; color: #91a0b4; font-size: 12px; line-height: 1.55; border-top: 1px solid #232b38; padding-top: 10px; }
@@ -107,6 +123,8 @@
       .market-row { grid-template-columns: 1fr; }
       .market-time, .prices, .market-action, .market-detail { grid-column: 1; }
       .bet-row { grid-template-columns: 1fr 1fr; }
+      .lineup-grid { grid-template-columns: 1fr; }
+      .lineup-details { grid-column: 1; }
     }
   </style>
 </head>
@@ -114,9 +132,9 @@
 <main>
   <div class="topbar">
     <section>
-      <div class="eyebrow">MLB · Polymarket board + institutional prop lab · v0.12.1</div>
+      <div class="eyebrow">MLB · Polymarket board + confirmed-lineup lab · v0.12.2</div>
       <h1>Live markets, saved paper bets, and an optimized pregame model.</h1>
-      <p class="lede">Games stay in official first-pitch order. v0.12.1 adds prop paper betting, official strikeout settlement, and clearer executable-price controls while retaining the guarded model tournament.</p>
+      <p class="lede">Games stay in official first-pitch order. v0.12.2 automatically polls official batting orders, locks moneyline paper bets until both lineups are confirmed, and reprices confirmed games with lineup-specific offense.</p>
     </section>
     <aside class="controls">
       <label for="kelly">Kelly sizing</label>
@@ -477,6 +495,10 @@
     if (!latestData) return;
     const game = latestData.games.find(item => item.game_pk === gamePk);
     if (!game || game.signal !== 'BET' || game.recommended_side !== team) return;
+    if (!game.lineup_bet_eligible) {
+      alert('Moneyline paper betting is locked until both official starting lineups are confirmed and the lineup-specific probability has been calculated.');
+      return;
+    }
     const side = game.side_a.team === team ? game.side_a : game.side_b;
     if (byId('bet-strategy').value === 'confirmed' && side.sabermetric_support !== 'CONFIRMED') {
       alert('This side has an economic edge, but the independent sabermetric drivers are not fully confirmed. Change the paper-bet filter to place it anyway.');
@@ -531,6 +553,34 @@
     </div>`;
   }
 
+  function lineupStateBox(game) {
+    const status = String(game.lineup_status || 'PENDING').toUpperCase();
+    const css = status === 'CONFIRMED' ? 'confirmed' : status === 'PARTIAL' ? 'partial' : 'pending';
+    return `<div class="lineup-state ${css}"><strong>${esc(status === 'CONFIRMED' ? 'LINEUPS CONFIRMED' : status === 'PARTIAL' ? 'LINEUPS PARTIAL' : 'LINEUPS PENDING')}</strong><span>${esc(game.lineup_note || 'Official starting lineups are not available yet.')}</span></div>`;
+  }
+
+  function lineupCard(title, players, xwoba, delta) {
+    if (!Array.isArray(players) || players.length !== 9) {
+      return `<section class="lineup-card"><h4>${esc(title)}</h4><div class="muted">Official starting lineup not available yet.</div></section>`;
+    }
+    const rows = players.map(player => `<li><span class="lineup-slot">${Number(player.batting_slot)}</span><img src="${playerHeadshotUrl(player.player_id)}" alt="" loading="lazy" onerror="this.style.display='none'"><span>${esc(player.full_name)}</span><span class="lineup-position">${esc(player.position || '')}</span></li>`).join('');
+    const metrics = xwoba !== null && xwoba !== undefined && Number.isFinite(Number(xwoba))
+      ? `<div class="lineup-metrics">Projected xwOBA ${Number(xwoba).toFixed(3)} · vs team baseline ${Number(delta) >= 0 ? '+' : ''}${Number(delta).toFixed(3)}</div>`
+      : '';
+    return `<section class="lineup-card"><h4>${esc(title)}</h4><ol>${rows}</ol>${metrics}</section>`;
+  }
+
+  function renderMoneylineLineups(game) {
+    const state = lineupStateBox(game);
+    if (String(game.lineup_status || '') !== 'CONFIRMED') {
+      return `<div class="lineup-details">${state}</div>`;
+    }
+    const adjustment = game.lineup_probability_change !== null && game.lineup_probability_change !== undefined && Number.isFinite(Number(game.lineup_probability_change))
+      ? `<div class="lineup-metrics">Early home probability ${pct(game.early_home_probability)} → confirmed-lineup probability ${pct(game.lineup_adjusted_home_probability)} · change ${Number(game.lineup_probability_change) >= 0 ? '+' : ''}${pct(game.lineup_probability_change)}</div>`
+      : `<div class="lineup-metrics">Lineups are confirmed, but the offense projection is not yet eligible for betting.</div>`;
+    return `<details class="lineup-details"><summary>View confirmed starting lineups and repricing</summary>${state}<div class="lineup-grid">${lineupCard(game.away_team, game.away_lineup, game.away_lineup_xwoba, game.away_lineup_delta)}${lineupCard(game.home_team, game.home_lineup, game.home_lineup_xwoba, game.home_lineup_delta)}</div>${adjustment}</details>`;
+  }
+
   function marketRow(game) {
     const selected = game.recommended_side === game.side_a.team ? game.side_a : game.side_b;
     const existingBet = paperBetForGame(game.game_pk);
@@ -544,11 +594,11 @@
           ? `<div class="bet-placed">FILTERED · economic edge, but stats ${esc(selected.sabermetric_support)}</div>`
           : '';
     const pitchers = `${esc(game.away_probable_pitcher || 'TBD')} vs ${esc(game.home_probable_pitcher || 'TBD')}`;
-    const lineupStatus = game.away_lineup_confirmed && game.home_lineup_confirmed
-      ? 'Confirmed lineups archived'
-      : game.away_lineup_confirmed || game.home_lineup_confirmed
-        ? 'One lineup confirmed'
-        : 'Lineups not confirmed yet';
+    const lineupStatus = String(game.lineup_status || 'PENDING') === 'CONFIRMED'
+      ? 'Confirmed lineups applied'
+      : String(game.lineup_status || 'PENDING') === 'PARTIAL'
+        ? 'Partial lineup received'
+        : 'Lineups not released yet';
     return `<article class="market-row">
       <div class="market-time">${timeOnly(game.start_time)}<small>MLB</small></div>
       <div class="matchup">
@@ -562,6 +612,7 @@
         <a class="button secondary" href="${esc(game.polymarket_url)}" target="_blank" rel="noreferrer">Polymarket</a>
       </div>
       <div class="market-detail">${esc(game.recommendation_reason)}<br>${safeDate(game.start_time)} · ${pitchers} · ${esc(game.venue || 'Venue TBD')} · ${esc(lineupStatus)} · Volume ${Number(game.volume || 0).toLocaleString()}</div>
+      ${renderMoneylineLineups(game)}
     </article>`;
   }
 
@@ -604,7 +655,12 @@
       } else if (filtered) {
         byId('top-pick').innerHTML = `<div class="pick-title">Economic edge found, but statistics are mixed.</div><div class="muted">${esc(filtered.team)} clears the price thresholds but has ${esc(filtered.sabermetric_support)} driver support. The confirmed strategy filters it out.</div>`;
       } else {
-        byId('top-pick').innerHTML = '<div class="pick-title">No paper bet right now.</div><div class="muted">No upcoming side clears both the 5% model-edge and 5% expected-ROI thresholds at the current executable asks.</div>';
+        const waiting = data.games.find(item => item.signal === 'WAIT');
+        if (waiting) {
+          byId('top-pick').innerHTML = `<div class="pick-title">Waiting for official lineups.</div><div class="muted">Early probabilities remain visible, but moneyline paper betting is locked until both nine-man batting orders are posted and the lineup-specific repricing succeeds.</div>`;
+        } else {
+          byId('top-pick').innerHTML = '<div class="pick-title">No paper bet right now.</div><div class="muted">No upcoming side clears both the 5% model-edge and 5% expected-ROI thresholds at the current executable asks.</div>';
+        }
       }
       return;
     }

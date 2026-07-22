@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 
+from .lineups import LineupStatus, parse_game_lineups
 from .teams import canonical_team_name
 
 MLB_STATS_BASE_URL = "https://statsapi.mlb.com/api/v1"
@@ -112,6 +113,14 @@ class MlbGameState:
     home_lineup_ids: tuple[int, ...] = ()
     away_lineup_names: tuple[str, ...] = ()
     home_lineup_names: tuple[str, ...] = ()
+    away_lineup_slots: tuple[int, ...] = ()
+    home_lineup_slots: tuple[int, ...] = ()
+    away_lineup_positions: tuple[str | None, ...] = ()
+    home_lineup_positions: tuple[str | None, ...] = ()
+    away_lineup_status: str = LineupStatus.PENDING.value
+    home_lineup_status: str = LineupStatus.PENDING.value
+    away_lineup_hash: str | None = None
+    home_lineup_hash: str | None = None
     away_batting: MlbBattingLine | None = None
     home_batting: MlbBattingLine | None = None
 
@@ -281,36 +290,6 @@ def _parse_boxscore_side(payload: object, *, team: str) -> tuple[MlbPitchingLine
     return tuple(lines)
 
 
-def _parse_lineup_side(payload: object) -> tuple[tuple[int, ...], tuple[str, ...]]:
-    if not isinstance(payload, dict):
-        return (), ()
-    batter_ids = payload.get("batters")
-    players = payload.get("players")
-    if not isinstance(batter_ids, list) or not isinstance(players, dict):
-        return (), ()
-    ordered: list[tuple[int, int, str]] = []
-    for position, raw_id in enumerate(batter_ids):
-        player_id = _safe_int(raw_id)
-        if player_id is None:
-            continue
-        player = players.get(f"ID{player_id}") or players.get(str(player_id)) or {}
-        if not isinstance(player, dict):
-            continue
-        person = player.get("person") or {}
-        batting_order = _safe_int(player.get("battingOrder"))
-        if batting_order is None or batting_order <= 0:
-            continue
-        ordered.append((batting_order, player_id, _optional_text(person.get("fullName")) or str(player_id)))
-    ordered.sort(key=lambda item: (item[0], item[1]))
-    # A confirmed MLB batting order should contain nine hitters.
-    if len(ordered) < 9:
-        return (), ()
-    return (
-        tuple(item[1] for item in ordered[:9]),
-        tuple(item[2] for item in ordered[:9]),
-    )
-
-
 def _parse_team_batting(payload: object) -> MlbBattingLine | None:
     if not isinstance(payload, dict):
         return None
@@ -337,16 +316,23 @@ def attach_boxscore_payload(game: MlbGameState, payload: object) -> MlbGameState
     teams = payload.get("teams") or {}
     if not isinstance(teams, dict):
         return game
-    away_ids, away_names = _parse_lineup_side(teams.get("away"))
-    home_ids, home_names = _parse_lineup_side(teams.get("home"))
+    lineups = parse_game_lineups(game_pk=game.game_pk, payload=payload)
     return replace(
         game,
         away_pitching=_parse_boxscore_side(teams.get("away"), team=game.away_team),
         home_pitching=_parse_boxscore_side(teams.get("home"), team=game.home_team),
-        away_lineup_ids=away_ids,
-        home_lineup_ids=home_ids,
-        away_lineup_names=away_names,
-        home_lineup_names=home_names,
+        away_lineup_ids=tuple(player.player_id for player in lineups.away.players),
+        home_lineup_ids=tuple(player.player_id for player in lineups.home.players),
+        away_lineup_names=tuple(player.full_name for player in lineups.away.players),
+        home_lineup_names=tuple(player.full_name for player in lineups.home.players),
+        away_lineup_slots=tuple(player.batting_slot for player in lineups.away.players),
+        home_lineup_slots=tuple(player.batting_slot for player in lineups.home.players),
+        away_lineup_positions=tuple(player.position for player in lineups.away.players),
+        home_lineup_positions=tuple(player.position for player in lineups.home.players),
+        away_lineup_status=lineups.away.status.value,
+        home_lineup_status=lineups.home.status.value,
+        away_lineup_hash=lineups.away.source_hash,
+        home_lineup_hash=lineups.home.source_hash,
         away_batting=_parse_team_batting(teams.get("away")),
         home_batting=_parse_team_batting(teams.get("home")),
     )

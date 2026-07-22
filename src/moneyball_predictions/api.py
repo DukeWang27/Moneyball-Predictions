@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Literal
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +18,8 @@ from .live import (
     build_live_mlb_predictions,
     build_single_scoreboard_game,
 )
+from .lineups import parse_game_lineups
+from .mlb import MLB_STATS_BASE_URL
 from .model import log5_probability, pythagorean_expectation
 from .odds import devig_two_way_decimal, expected_value
 from .player_props import (
@@ -25,15 +28,18 @@ from .player_props import (
     build_strikeout_prop_settlement,
 )
 from .research_api import router as research_router
+from .storage import insert_lineup_snapshot
 from .schemas import (
     BacktestResponse,
     EdgePerformanceResponse,
+    GameLineupsResponse,
     LiveMlbResponse,
     PredictionRequest,
     PredictionResponse,
     PropBoardResponse,
     PropSettlementResponse,
     ScoreboardGame,
+    TeamLineupResponse,
     SideAnalysis,
 )
 
@@ -42,7 +48,7 @@ STATIC_DIR = PACKAGE_DIR / "static"
 
 app = FastAPI(
     title="Moneyball Predictions API",
-    version="0.12.1",
+    version="0.12.2",
     description="MLB moneylines, pitcher props, paper trading, execution research, and leakage-safe model comparison.",
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -138,6 +144,60 @@ async def mlb_edge_performance(
         )
     except EdgePerformanceError as exc:
         raise HTTPException(status_code=502, detail=f"Edge performance refresh failed: {exc}") from exc
+
+
+@app.get(
+    "/api/v1/mlb/game/{game_pk}/lineups",
+    response_model=GameLineupsResponse,
+)
+async def mlb_game_lineups(game_pk: int) -> GameLineupsResponse:
+    """Fetch and archive the current official starting-lineup state for one game."""
+    timeout = httpx.Timeout(20.0, connect=8.0)
+    try:
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            follow_redirects=True,
+            headers={"User-Agent": "Moneyball-Predictions/0.12.2 lineup-status"},
+        ) as client:
+            response = await client.get(f"{MLB_STATS_BASE_URL}/game/{game_pk}/boxscore")
+            response.raise_for_status()
+            lineups = parse_game_lineups(
+                game_pk=game_pk,
+                payload=response.json(),
+                captured_at=datetime.now(UTC),
+            )
+    except (httpx.HTTPError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"MLB lineup refresh failed: {exc}") from exc
+
+    insert_lineup_snapshot(lineups.away)
+    insert_lineup_snapshot(lineups.home)
+
+    def team_payload(lineup) -> TeamLineupResponse:
+        return TeamLineupResponse(
+            game_pk=lineup.game_pk,
+            side=lineup.side,
+            team_id=lineup.team_id,
+            status=lineup.status.value,
+            captured_at=lineup.captured_at,
+            source_hash=lineup.source_hash,
+            players=[
+                {
+                    "player_id": player.player_id,
+                    "full_name": player.full_name,
+                    "batting_slot": player.batting_slot,
+                    "position": player.position,
+                }
+                for player in lineup.players
+            ],
+        )
+
+    return GameLineupsResponse(
+        game_pk=game_pk,
+        status=lineups.status.value,
+        both_confirmed=lineups.both_confirmed,
+        away=team_payload(lineups.away),
+        home=team_payload(lineups.home),
+    )
 
 
 @app.get("/api/v1/mlb/game/{game_pk}", response_model=ScoreboardGame)

@@ -70,6 +70,13 @@ class LiveMarketSide(BaseModel):
     value_grade: Literal["A", "B", "C", "LEAN", "PASS"] = "PASS"
 
 
+class LineupPlayerResponse(BaseModel):
+    player_id: int
+    full_name: str
+    batting_slot: int = Field(ge=1, le=9)
+    position: str | None = None
+
+
 class LiveGamePrediction(BaseModel):
     event_id: str
     market_id: str
@@ -88,19 +95,50 @@ class LiveGamePrediction(BaseModel):
     home_lineup_confirmed: bool = False
     away_lineup_names: list[str] = Field(default_factory=list)
     home_lineup_names: list[str] = Field(default_factory=list)
+    away_lineup: list[LineupPlayerResponse] = Field(default_factory=list)
+    home_lineup: list[LineupPlayerResponse] = Field(default_factory=list)
+    lineup_status: Literal["PENDING", "PARTIAL", "CONFIRMED"] = "PENDING"
+    lineup_model_used: bool = False
+    lineup_bet_eligible: bool = False
+    lineup_note: str = "Official starting lineups are not available yet."
+    early_home_probability: float | None = Field(default=None, ge=0, le=1)
+    lineup_adjusted_home_probability: float | None = Field(default=None, ge=0, le=1)
+    home_lineup_xwoba: float | None = None
+    away_lineup_xwoba: float | None = None
+    home_lineup_delta: float | None = None
+    away_lineup_delta: float | None = None
+    lineup_probability_change: float | None = None
     team_a_strength: float
     team_b_strength: float
     side_a: LiveMarketSide
     side_b: LiveMarketSide
     recommended_side: str | None
-    signal: Literal["BET", "LEAN", "PASS"]
+    signal: Literal["BET", "LEAN", "PASS", "WAIT"]
     recommendation_reason: str
     liquidity: float | None = None
     volume: float | None = None
-    model_version: str = "v0.12.1"
+    model_version: str = "v0.12.2"
     methodology: str = (
-        "v0.12.1 institutional prop lab using leakage-safe baseball features, regularized logistic regression, boosted trees, expected-runs probabilities, and a validation-selected ensemble"
+        "v0.12.2 confirmed-lineup gate using immutable lineup snapshots, conservative lineup-specific offense repricing, and the guarded v0.10 model tournament"
     )
+
+
+class TeamLineupResponse(BaseModel):
+    game_pk: int
+    side: Literal["away", "home"]
+    team_id: int | None = None
+    status: Literal["PENDING", "PARTIAL", "CONFIRMED"]
+    captured_at: datetime
+    source_hash: str
+    players: list[LineupPlayerResponse] = Field(default_factory=list)
+
+
+class GameLineupsResponse(BaseModel):
+    game_pk: int
+    status: Literal["PENDING", "PARTIAL", "CONFIRMED"]
+    both_confirmed: bool
+    away: TeamLineupResponse
+    home: TeamLineupResponse
 
 
 class RecommendedBet(BaseModel):
@@ -167,7 +205,7 @@ class MatchingDiagnostics(BaseModel):
 class LiveMlbResponse(BaseModel):
     generated_at: datetime
     season: int
-    model_version: str = "v0.12.1"
+    model_version: str = "v0.12.2"
     model_training_rows: int = 0
     model_validation_rows: int = 0
     bankroll: float
@@ -434,7 +472,7 @@ class StrikeoutPropPrediction(BaseModel):
     polymarket_url: str
     volume: float | None = None
     liquidity: float | None = None
-    model_version: str = "v0.12.1-poisson-k"
+    model_version: str = "v0.12.2-poisson-k"
 
 
 class PropBoardResponse(BaseModel):

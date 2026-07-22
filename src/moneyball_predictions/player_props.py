@@ -39,7 +39,7 @@ from .schemas import (
     StrikeoutPropPrediction,
 )
 
-MODEL_VERSION = "v0.12.1-poisson-k"
+MODEL_VERSION = "v0.12.2-poisson-k"
 EASTERN = ZoneInfo("America/New_York")
 LEAGUE_K_RATE = 0.225
 LEAGUE_REACH_RATE = 0.315
@@ -635,7 +635,7 @@ async def build_strikeout_prop_board(
         "skipped_started": 0,
     }
     timeout = httpx.Timeout(45.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.12.0 prop-research"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.12.2 prop-research"}
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
             markets, schedule = await asyncio.gather(
@@ -797,7 +797,7 @@ async def build_strikeout_prop_settlement(
 ) -> PropSettlementResponse:
     """Grade one browser paper prop from the official MLB game box score."""
     timeout = httpx.Timeout(20.0, connect=8.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.12.1 prop-settlement"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.12.2 prop-settlement"}
     try:
         async with httpx.AsyncClient(
             timeout=timeout,

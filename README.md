@@ -1,63 +1,91 @@
-# Moneyball Predictions v0.12.1
+# Moneyball Predictions v0.12.2
 
-Local FastAPI application for MLB pregame forecasting, Polymarket moneyline and player-prop research, browser paper trading, archived edge/CLV analysis, and deterministic model experimentation.
+Local FastAPI application for MLB pregame forecasting, Polymarket moneyline and pitcher-prop research, browser paper trading, archived edge/CLV analysis, and deterministic model experimentation.
 
-## v0.12 additions
+## v0.12.2 confirmed-lineup process
 
-- Adds a live, read-only **pitcher strikeout prop board**.
-- Discovers active Polymarket strikeout markets without assuming one permanent market-type name.
-- Maps market player names to official MLB player IDs with exact matching, a persistent player cache, and conservative fuzzy fallback.
-- Matches the pitcher to the official MLB schedule and confirmed probable starter.
-- Builds a transparent Poisson strikeout baseline from:
-  - regressed pitcher strikeout rate,
-  - projected starter innings,
-  - confirmed opposing-lineup strikeout rate when available,
-  - league fallback when lineups are not yet confirmed.
-- Prices both YES and NO by walking the full Polymarket ask book for the chosen dollar stake.
-- Requires a fully fillable order plus 5% executable edge and 5% expected ROI for a prop `BET` signal.
-- Adds official MLB team logos and player headshots.
-- Adds a slate/navy institutional theme with neon `BET`, yellow `LEAN`, gray `PASS`, and monospace numerical tables.
-- Adds a JSON-driven Release Notes modal from `static/changelog.json`.
-- Preserves v0.11 Base Runs, FIP/xFIP, lineup linear-weights research, leverage fatigue, deterministic hashing, SQLite records, and dry-run maker planning.
+Every pregame moneyline now has one standardized lineup state:
 
-## Scope and safety
+- `PENDING`: neither official nine-man batting order is available.
+- `PARTIAL`: one lineup or an incomplete lineup is available.
+- `CONFIRMED`: both teams have exactly nine official starters.
 
-Real-money submission is still disabled. The prop board, VWAP calculations, and passive-order planner are research tools. The optional CLOB SDK is not needed for paper research.
+The canonical parser accepts only MLB `battingOrder` values `100, 200, ..., 900`. Later substitutions such as `101` or `201` are excluded from the announced starting nine.
 
-The Poisson strikeout model is an auditable baseline. It must be forward-tested and compared with negative-binomial or mixture models before it is treated as a mature prop model.
+Moneyline paper betting is locked until:
+
+1. both probable starters have official MLB IDs;
+2. both official lineups contain nine starters;
+3. lineup-specific offense repricing succeeds; and
+4. the repriced side clears the 5% edge and 5% expected-ROI gates.
+
+Before confirmation, the dashboard still shows the early model probability and market price, but the signal is `WAIT` and no paper-bet button appears.
+
+## Confirmed-lineup repricing
+
+For each hitter, v0.12.2 requests current-season hitting statistics against the opposing starter's handedness when the split is available. It creates a shrunken event-rate projection for unintentional walks, hit-by-pitches, singles, doubles, triples, and home runs, then calculates a lineup xwOBA with batting-order weights.
+
+To avoid double-counting elite teams, the adjustment is based on:
+
+```text
+(home confirmed-lineup xwOBA - home team baseline xwOBA)
+-
+(away confirmed-lineup xwOBA - away team baseline xwOBA)
+```
+
+That difference is applied conservatively in log-odds space and capped. This is a transparent T1H overlay, not yet a historically promoted replacement for the v0.10 champion. Its coefficient must be validated with archived point-in-time lineups before being increased.
+
+Optional environment controls:
+
+```bash
+export MONEYBALL_LINEUP_LOGIT_COEFFICIENT=4.0
+export MONEYBALL_LINEUP_LOGIT_CAP=0.20
+```
+
+## Immutable lineup storage
+
+The research database now includes `lineup_snapshots`. A new row is inserted only when a team's lineup hash changes. `PENDING`, `PARTIAL`, `CONFIRMED`, and later lineup changes remain permanently auditable.
 
 ## Install
 
 ```bash
 cd ~/Desktop/baseball/Moneyball-Predictions
-unzip -o ~/Downloads/moneyball-polymarket-v0.12.1.zip -d .
+unzip -o ~/Downloads/moneyball-polymarket-v0.12.2.zip -d .
 source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ruff check .
 pytest -q
 ```
 
-Expected: `76 passed`.
+Expected:
 
-## Initialize deterministic storage
+```text
+85 passed
+```
+
+## Initialize or migrate storage
 
 ```bash
 python scripts/init_research_db.py
 ```
 
-## Refresh historical MLB box scores
+The command preserves existing predictions, market snapshots, paper-bet browser data, and other SQLite records while adding the lineup table.
+
+## Start the server and automatic lineup poller together
 
 ```bash
-python scripts/fetch_pitching_data.py --seasons 2021 2022 2023 2024 2025 2026
+bash scripts/start_local.sh
 ```
 
-The command is resumable and skips files already cached.
+This starts:
 
-## Start the dashboard
-
-```bash
-python -m uvicorn moneyball_predictions.api:app --reload
+```text
+FastAPI / Uvicorn
+60-second official MLB lineup polling
+immutable lineup snapshot storage
 ```
+
+Press `Control + C` once to stop both processes.
 
 Open:
 
@@ -65,72 +93,31 @@ Open:
 http://127.0.0.1:8000
 ```
 
-Hard-refresh on macOS with `Command + Shift + R`.
+Hard refresh on macOS with `Command + Shift + R`.
 
 The header should say:
 
 ```text
-MLB · Polymarket board + institutional prop lab · v0.12.1
+MLB · Polymarket board + confirmed-lineup lab · v0.12.2
 ```
 
-## Strikeout prop API
+## Poll or inspect lineups manually
+
+One polling pass:
 
 ```bash
-curl -s "http://127.0.0.1:8000/api/v1/props/strikeouts?stake_dollars=50&days=3" \
+python scripts/poll_lineups.py --once
+```
+
+Inspect one game's current official lineup state:
+
+```bash
+curl -s http://127.0.0.1:8000/api/v1/mlb/game/GAME_PK/lineups \
   | python -m json.tool
 ```
 
-Important returned fields:
+## Important research limitation
 
-```text
-projected_innings
-expected_batters_faced
-pitcher_k_rate
-opponent_lineup_k_rate
-matchup_k_rate
-expected_strikeouts
-probability_yes
-probability_no
-yes.executable_price
-no.executable_price
-edge
-expected_roi
-signal
-lineup_status
-```
+Historical final box scores reveal who ultimately started, but they do not by themselves establish when a lineup became publicly available. Forward lineup snapshots created by this release are therefore the trusted source for future T24H-versus-T1H CLV and ROI testing.
 
-When no active mapped strikeout markets exist, the endpoint returns an empty `props` list and diagnostics rather than fabricating markets.
-
-## Research execution endpoints
-
-### Dollar-stake VWAP
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/api/v1/research/execution/vwap \
-  -H 'Content-Type: application/json' \
-  --data @examples/orderbook_vwap_request.json | python -m json.tool
-```
-
-### Dry-run passive maker plan
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/api/v1/research/execution/passive-plan \
-  -H 'Content-Type: application/json' \
-  --data @examples/passive_plan_request.json | python -m json.tool
-```
-
-### Immutable prediction test
-
-```bash
-curl -s -X POST http://127.0.0.1:8000/api/v1/research/predictions/immutable \
-  -H 'Content-Type: application/json' \
-  --data @examples/immutable_prediction_request.json | python -m json.tool
-```
-
-## Optional trading SDK
-
-```bash
-python -m pip install -e ".[trading]"
-```
-
-Do not add wallet secrets until maker-order simulation, stale-book rejection, cancellations, exposure limits, heartbeat handling, and the global kill switch have been forward-tested.
+Real-money order submission remains disabled. Paper trading and order-book research remain local.

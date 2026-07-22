@@ -1,5 +1,17 @@
 [
   {
+    "version": "v0.12.2",
+    "date": "2026-07-21",
+    "changes": [
+      "Added one strict MLB starting-lineup parser shared by moneylines, props, storage, and polling.",
+      "Added immutable PENDING, PARTIAL, and CONFIRMED lineup snapshots in SQLite.",
+      "Locked moneyline paper bets until both official nine-man lineups and both starters are available.",
+      "Added confirmed-lineup xwOBA repricing relative to each team’s own handedness baseline.",
+      "Added automatic 60-second lineup polling and lineup-change detection.",
+      "Added expandable batting-order cards with player headshots and probability-change diagnostics."
+    ]
+  },
+  {
     "version": "v0.12.1",
     "date": "2026-07-21",
     "changes": [

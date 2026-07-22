@@ -3,7 +3,7 @@
   "horizon": "T1H",
   "as_of": "2026-07-20T22:00:00Z",
   "model_version": "v0.12 manual test",
-  "feature_schema_version": "v0.12.1",
+  "feature_schema_version": "v0.12.2",
   "code_commit_sha": "local",
   "model_artifact_sha256": "manual-test",
   "features": {

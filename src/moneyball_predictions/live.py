@@ -12,9 +12,11 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from .lineup_offense import ConfirmedLineupAdjustment, build_confirmed_lineup_adjustment
+from .lineups import LineupStatus, parse_game_lineups
 from .market_archive import append_market_snapshots
 from .reproducibility import sha256_json
-from .storage import insert_prediction
+from .storage import insert_lineup_snapshot, insert_prediction
 from .mlb import (
     MlbDataError,
     MlbGameState,
@@ -245,6 +247,31 @@ def _match_schedule_game(
     return best
 
 
+def paper_bet_eligibility(
+    *,
+    lineup_status: str,
+    lineup_model_used: bool,
+    starters_confirmed: bool,
+    signal: str,
+    edge: float,
+    expected_roi: float,
+) -> tuple[bool, str]:
+    """Return the deterministic moneyline paper-bet gate and its reason."""
+    if not starters_confirmed:
+        return False, "Waiting for both probable starters"
+    if lineup_status != LineupStatus.CONFIRMED.value:
+        return False, "Waiting for both official starting lineups"
+    if not lineup_model_used:
+        return False, "Lineups are confirmed, but lineup offense repricing is unavailable"
+    if signal != "BET":
+        return False, "Current executable price does not qualify"
+    if edge < MIN_BET_EDGE:
+        return False, "Edge below 5% threshold"
+    if expected_roi < MIN_BET_ROI:
+        return False, "Expected ROI below 5% threshold"
+    return True, "Eligible"
+
+
 def _signal_for_sides(
     side_a: LiveMarketSide,
     side_b: LiveMarketSide,
@@ -357,6 +384,7 @@ async def _attach_pregame_lineups(
     client: httpx.AsyncClient,
     schedule: list[MlbGameState],
 ) -> list[MlbGameState]:
+    """Fetch, archive, and attach the current official lineup state for each pregame."""
     pregame = [game for game in schedule if game.is_pregame]
     if not pregame:
         return schedule
@@ -364,11 +392,18 @@ async def _attach_pregame_lineups(
         *(fetch_mlb_boxscore(client, game.game_pk) for game in pregame),
         return_exceptions=True,
     )
-    enriched = {
-        game.game_pk: attach_boxscore_payload(game, payload)
-        for game, payload in zip(pregame, payloads, strict=True)
-        if not isinstance(payload, Exception)
-    }
+    enriched: dict[int, MlbGameState] = {}
+    for game, payload in zip(pregame, payloads, strict=True):
+        if isinstance(payload, Exception):
+            continue
+        try:
+            lineups = parse_game_lineups(game_pk=game.game_pk, payload=payload)
+            insert_lineup_snapshot(lineups.away)
+            insert_lineup_snapshot(lineups.home)
+        except (OSError, sqlite3.Error, TypeError, ValueError):
+            # Snapshot storage must never make the live board unavailable.
+            pass
+        enriched[game.game_pk] = attach_boxscore_payload(game, payload)
     return [enriched.get(game.game_pk, game) for game in schedule]
 
 
@@ -440,6 +475,7 @@ def _archive_immutable_horizon_prediction(
     calibrated_home_probability: float,
     artifact: ModelTournamentArtifact | None,
     team_strengths: tuple[float, float],
+    lineup_adjustment: ConfirmedLineupAdjustment | None,
 ) -> None:
     """Best-effort freeze at T-24h or T-1h; never break the dashboard."""
     game_time = _parse_start_time(game.game_date)
@@ -447,7 +483,7 @@ def _archive_immutable_horizon_prediction(
         return
     minutes = (game_time - now).total_seconds() / 60.0
     both_lineups = len(game.away_lineup_ids) == 9 and len(game.home_lineup_ids) == 9
-    if 45.0 <= minutes <= 75.0 and both_lineups:
+    if 3.0 <= minutes <= 180.0 and both_lineups and lineup_adjustment is not None:
         horizon = "T1H"
         frozen_as_of = game_time - timedelta(hours=1)
     elif 1380.0 <= minutes <= 1500.0 and not both_lineups:
@@ -471,6 +507,17 @@ def _archive_immutable_horizon_prediction(
             "fallback_team_b_strength": team_strengths[1],
         }
     )
+    if lineup_adjustment is not None:
+        feature_payload.update({
+            "HomeLineupXwOBA": lineup_adjustment.home_lineup_xwoba,
+            "AwayLineupXwOBA": lineup_adjustment.away_lineup_xwoba,
+            "HomeTeamBaselineXwOBA": lineup_adjustment.home_team_baseline_xwoba,
+            "AwayTeamBaselineXwOBA": lineup_adjustment.away_team_baseline_xwoba,
+            "HomeLineupDelta": lineup_adjustment.home_lineup_delta,
+            "AwayLineupDelta": lineup_adjustment.away_lineup_delta,
+            "LineupAdvantage": lineup_adjustment.lineup_advantage,
+            "LineupLogitAdjustment": lineup_adjustment.logit_adjustment,
+        })
     artifact_payload = {
         "champion_key": artifact.champion_key if artifact else "fallback",
         "selection_folds": list(artifact.selection_folds) if artifact else [],
@@ -485,6 +532,9 @@ def _archive_immutable_horizon_prediction(
         "home_pitcher_id": game.home_probable_pitcher_id,
         "away_lineup_ids": list(game.away_lineup_ids),
         "home_lineup_ids": list(game.home_lineup_ids),
+        "away_lineup_hash": game.away_lineup_hash,
+        "home_lineup_hash": game.home_lineup_hash,
+        "lineup_model_used": lineup_adjustment is not None,
     }
     try:
         insert_prediction(
@@ -492,7 +542,7 @@ def _archive_immutable_horizon_prediction(
             horizon=horizon,
             as_of=frozen_as_of,
             model_version=model_version,
-            feature_schema_version="v0.12.1",
+            feature_schema_version="v0.12.2",
             code_commit_sha=os.environ.get("MONEYBALL_CODE_COMMIT", "unknown"),
             model_artifact_sha256=sha256_json(artifact_payload),
             calibration_artifact_sha256=None,
@@ -516,14 +566,14 @@ async def build_live_mlb_predictions(
     season: int | None = None,
     days: int = 2,
 ) -> LiveMlbResponse:
-    """Fetch MLB scores and price upcoming games with the v0.12 tournament or its explicit v0.7 fallback."""
+    """Fetch MLB scores and price upcoming games with the v0.12.2 lineup-gated tournament or its explicit v0.7 fallback."""
     now = datetime.now(UTC)
     now_eastern = now.astimezone(EASTERN)
     resolved_season = season or now_eastern.year
     start_date = now_eastern.date()
     end_date = start_date + timedelta(days=max(days, 1) - 1)
     timeout = httpx.Timeout(90.0, connect=10.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.12.1 institutional-dashboard"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.12.2 lineup-gated-dashboard"}
     runtime_counts: Counter[str] = Counter()
     optimized_context: LiveOptimizedContext | None = None
 
@@ -605,6 +655,11 @@ async def build_live_mlb_predictions(
     games: list[LiveGamePrediction] = []
     recommended_bets: list[RecommendedBet] = []
     archive_rows: list[dict[str, object]] = []
+    lineup_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(30.0, connect=8.0),
+        follow_redirects=True,
+        headers={"User-Agent": "Moneyball-Predictions/0.12.2 lineup-offense"},
+    )
     prior_values = list(prior_team_stats.values())
     prior_games_total = sum(item.games_played for item in prior_values)
     prior_league_runs = (
@@ -673,6 +728,7 @@ async def build_live_mlb_predictions(
             if market.team_a == official_game.home_team
             else 1.0 - fallback_probability_a
         )
+        home_probability = raw_home_probability
         model_version = "v0.5 fallback"
         matchup_features: tuple[float, ...] | None = None
         if optimized_context:
@@ -730,10 +786,47 @@ async def build_live_mlb_predictions(
                     else 1.0 - home_probability
                 )
                 model_version = (
-                    f"v0.12 {selected_label} ({selected_calibration})"
+                    f"v0.12.2 {selected_label} ({selected_calibration})"
                     if component_ready
                     else "v0.7 proxy · run pitching sync"
                 )
+        early_home_probability = home_probability
+        lineup_adjustment: ConfirmedLineupAdjustment | None = None
+        both_lineups_confirmed = (
+            official_game.away_lineup_status == LineupStatus.CONFIRMED.value
+            and official_game.home_lineup_status == LineupStatus.CONFIRMED.value
+            and len(official_game.away_lineup_ids) == 9
+            and len(official_game.home_lineup_ids) == 9
+        )
+        any_lineup_available = bool(
+            official_game.away_lineup_ids or official_game.home_lineup_ids
+        )
+        lineup_status = (
+            LineupStatus.CONFIRMED.value
+            if both_lineups_confirmed
+            else LineupStatus.PARTIAL.value
+            if any_lineup_available
+            else LineupStatus.PENDING.value
+        )
+        if both_lineups_confirmed:
+            try:
+                lineup_adjustment = await build_confirmed_lineup_adjustment(
+                    lineup_client,
+                    game=official_game,
+                    season=resolved_season,
+                    home_probability=home_probability,
+                )
+            except (httpx.HTTPError, TypeError, ValueError):
+                lineup_adjustment = None
+            if lineup_adjustment is not None:
+                home_probability = lineup_adjustment.home_probability_after
+                model_version = f"{model_version} + confirmed-lineup offense"
+
+        probability_a = (
+            home_probability
+            if market.team_a == official_game.home_team
+            else 1.0 - home_probability
+        )
         probability_b = 1.0 - probability_a
 
         book_a = books.get(market.token_a)
@@ -782,7 +875,68 @@ async def build_live_mlb_predictions(
             sabermetric_support_total=support_b[2],
             sabermetric_reasons=support_b[3],
         )
-        signal, recommended_side, reason = _signal_for_sides(side_a, side_b)
+        priced_signal, priced_side, priced_reason = _signal_for_sides(side_a, side_b)
+        starters_confirmed = (
+            official_game.away_probable_pitcher_id is not None
+            and official_game.home_probable_pitcher_id is not None
+        )
+        selected_for_gate = (
+            side_a if priced_side == side_a.team else side_b if priced_side == side_b.team else None
+        )
+        gate_edge = selected_for_gate.edge if selected_for_gate is not None else 0.0
+        gate_roi = selected_for_gate.expected_roi if selected_for_gate is not None else 0.0
+        gate_allowed, gate_reason = paper_bet_eligibility(
+            lineup_status=lineup_status,
+            lineup_model_used=lineup_adjustment is not None,
+            starters_confirmed=starters_confirmed,
+            signal=priced_signal,
+            edge=gate_edge,
+            expected_roi=gate_roi,
+        )
+        lineup_bet_eligible = (
+            lineup_status == LineupStatus.CONFIRMED.value
+            and lineup_adjustment is not None
+            and starters_confirmed
+        )
+        if lineup_status == LineupStatus.PENDING.value:
+            signal = "WAIT"
+            recommended_side = None
+            reason = (
+                "Early estimate only: official starting lineups are not available yet. "
+                "The app will poll MLB and reprice this game automatically after both lineups arrive."
+            )
+            lineup_note = "Waiting for both official starting lineups"
+        elif lineup_status == LineupStatus.PARTIAL.value:
+            signal = "WAIT"
+            recommended_side = None
+            reason = (
+                "Early estimate only: one or both official batting orders are incomplete. "
+                "Paper betting remains locked until all 18 starters are available."
+            )
+            lineup_note = "Partial lineup received; waiting for all 18 starters"
+        elif lineup_adjustment is None:
+            signal = "WAIT"
+            recommended_side = None
+            reason = (
+                "Both lineups are posted, but the lineup-specific offense projection lacks "
+                "enough point-in-time player data. Paper betting remains locked."
+            )
+            lineup_note = "Lineups confirmed; offense repricing unavailable"
+        else:
+            signal = priced_signal
+            recommended_side = priced_side
+            reason = (
+                f"{priced_reason} Confirmed-lineup adjustment changed the home probability "
+                f"by {lineup_adjustment.probability_change:+.1%}."
+            )
+            lineup_note = (
+                "Both lineups confirmed and probability repriced using the nine announced "
+                "hitters against the opposing starter hand"
+            )
+        if signal == "BET" and not gate_allowed:
+            signal = "WAIT"
+            recommended_side = None
+            reason = f"{gate_reason}. The pregame estimate is visible, but paper betting is locked."
 
         prediction = LiveGamePrediction(
             event_id=market.event_id,
@@ -802,6 +956,51 @@ async def build_live_mlb_predictions(
             home_lineup_confirmed=len(official_game.home_lineup_ids) == 9,
             away_lineup_names=list(official_game.away_lineup_names),
             home_lineup_names=list(official_game.home_lineup_names),
+            away_lineup=[
+                {
+                    "player_id": player_id,
+                    "full_name": name,
+                    "batting_slot": slot,
+                    "position": position,
+                }
+                for player_id, name, slot, position in zip(
+                    official_game.away_lineup_ids,
+                    official_game.away_lineup_names,
+                    official_game.away_lineup_slots,
+                    official_game.away_lineup_positions,
+                    strict=True,
+                )
+            ],
+            home_lineup=[
+                {
+                    "player_id": player_id,
+                    "full_name": name,
+                    "batting_slot": slot,
+                    "position": position,
+                }
+                for player_id, name, slot, position in zip(
+                    official_game.home_lineup_ids,
+                    official_game.home_lineup_names,
+                    official_game.home_lineup_slots,
+                    official_game.home_lineup_positions,
+                    strict=True,
+                )
+            ],
+            lineup_status=lineup_status,
+            lineup_model_used=lineup_adjustment is not None,
+            lineup_bet_eligible=lineup_bet_eligible,
+            lineup_note=lineup_note,
+            early_home_probability=early_home_probability,
+            lineup_adjusted_home_probability=(
+                lineup_adjustment.home_probability_after if lineup_adjustment else None
+            ),
+            home_lineup_xwoba=(lineup_adjustment.home_lineup_xwoba if lineup_adjustment else None),
+            away_lineup_xwoba=(lineup_adjustment.away_lineup_xwoba if lineup_adjustment else None),
+            home_lineup_delta=(lineup_adjustment.home_lineup_delta if lineup_adjustment else None),
+            away_lineup_delta=(lineup_adjustment.away_lineup_delta if lineup_adjustment else None),
+            lineup_probability_change=(
+                lineup_adjustment.probability_change if lineup_adjustment else None
+            ),
             team_a_strength=strength_a,
             team_b_strength=strength_b,
             side_a=side_a,
@@ -826,6 +1025,7 @@ async def build_live_mlb_predictions(
             ),
             artifact=optimized_context.artifact if optimized_context else None,
             team_strengths=(strength_a, strength_b),
+            lineup_adjustment=lineup_adjustment,
         )
         games.append(prediction)
         archive_rows.append(
@@ -882,6 +1082,17 @@ async def build_live_mlb_predictions(
                 "home_lineup_confirmed": len(official_game.home_lineup_ids) == 9,
                 "away_lineup_ids": list(official_game.away_lineup_ids),
                 "home_lineup_ids": list(official_game.home_lineup_ids),
+                "away_lineup_hash": official_game.away_lineup_hash,
+                "home_lineup_hash": official_game.home_lineup_hash,
+                "lineup_status": lineup_status,
+                "lineup_model_used": lineup_adjustment is not None,
+                "early_home_probability": early_home_probability,
+                "lineup_adjusted_home_probability": (
+                    lineup_adjustment.home_probability_after if lineup_adjustment else None
+                ),
+                "lineup_probability_change": (
+                    lineup_adjustment.probability_change if lineup_adjustment else None
+                ),
                 "signal": signal,
                 "recommended_side": recommended_side,
             }
@@ -917,6 +1128,7 @@ async def build_live_mlb_predictions(
                 )
             )
 
+    await lineup_client.aclose()
     games.sort(key=lambda game: _parse_start_time(game.start_time) or datetime.max.replace(tzinfo=UTC))
     grade_rank = {"A": 3, "B": 2, "C": 1}
     recommended_bets.sort(
@@ -935,7 +1147,7 @@ async def build_live_mlb_predictions(
         season=resolved_season,
         model_version=(
             (
-                f"v0.12 {optimized_context.artifact.champion.label} "
+                f"v0.12.2 {optimized_context.artifact.champion.label} "
                 f"({optimized_context.artifact.champion.calibration_method})"
                 if optimized_context.artifact.linear_artifact is not None
                 and optimized_context.artifact.linear_artifact.validation_component_coverage
@@ -962,7 +1174,7 @@ async def build_live_mlb_predictions(
 async def build_single_scoreboard_game(game_pk: int) -> ScoreboardGame:
     """Fetch one game for resolving a locally stored paper bet."""
     timeout = httpx.Timeout(15.0, connect=8.0)
-    headers = {"User-Agent": "Moneyball-Predictions/0.12.1 paper-settlement"}
+    headers = {"User-Agent": "Moneyball-Predictions/0.12.2 paper-settlement"}
     try:
         async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
             game = await fetch_mlb_game(client, game_pk)

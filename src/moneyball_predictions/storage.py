@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Mapping
 
+from .lineups import TeamLineup
 from .reproducibility import canonical_json, feature_sha256, sha256_json
 
 SCHEMA = """
@@ -44,9 +45,26 @@ CREATE TABLE IF NOT EXISTS prediction_runs (
 CREATE INDEX IF NOT EXISTS idx_prediction_game_horizon
 ON prediction_runs (game_id, horizon, as_of_utc);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_prediction_frozen_horizon
-ON prediction_runs (game_id, horizon, model_version)
-WHERE horizon IN ('T24H', 'T1H');
+DROP INDEX IF EXISTS idx_prediction_frozen_horizon;
+
+
+CREATE TABLE IF NOT EXISTS lineup_snapshots (
+    lineup_snapshot_id TEXT PRIMARY KEY,
+    game_pk INTEGER NOT NULL,
+    side TEXT NOT NULL CHECK (side IN ('away', 'home')),
+    team_id INTEGER,
+    status TEXT NOT NULL CHECK (status IN ('PENDING', 'PARTIAL', 'CONFIRMED')),
+    captured_at_utc TEXT NOT NULL,
+    source_hash_sha256 TEXT NOT NULL,
+    player_ids_json TEXT NOT NULL,
+    player_names_json TEXT NOT NULL,
+    batting_slots_json TEXT NOT NULL,
+    positions_json TEXT NOT NULL,
+    UNIQUE (game_pk, side, source_hash_sha256)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lineup_game_time
+ON lineup_snapshots (game_pk, captured_at_utc);
 
 CREATE TABLE IF NOT EXISTS market_snapshots (
     snapshot_id TEXT PRIMARY KEY,
@@ -212,6 +230,80 @@ def insert_prediction(
     return ImmutablePrediction(prediction_id, feature_hash, created)
 
 
+def insert_lineup_snapshot(
+    lineup: TeamLineup,
+    *,
+    path: Path | None = None,
+) -> bool:
+    """Insert one immutable lineup state; return True only when the hash is new."""
+    if lineup.captured_at.tzinfo is None:
+        raise ValueError("lineup captured_at must be timezone-aware")
+    snapshot_id = str(uuid.uuid5(
+        uuid.NAMESPACE_URL,
+        f"moneyball-lineup:{lineup.game_pk}:{lineup.side}:{lineup.source_hash}",
+    ))
+    with connect(path) as connection:
+        before = connection.total_changes
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO lineup_snapshots (
+                lineup_snapshot_id, game_pk, side, team_id, status,
+                captured_at_utc, source_hash_sha256, player_ids_json,
+                player_names_json, batting_slots_json, positions_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                snapshot_id,
+                lineup.game_pk,
+                lineup.side,
+                lineup.team_id,
+                lineup.status.value,
+                lineup.captured_at.astimezone(UTC).isoformat(),
+                lineup.source_hash,
+                json.dumps([player.player_id for player in lineup.players]),
+                json.dumps([player.full_name for player in lineup.players]),
+                json.dumps([player.batting_slot for player in lineup.players]),
+                json.dumps([player.position for player in lineup.players]),
+            ),
+        )
+        return connection.total_changes > before
+
+
+def latest_lineup_snapshots(
+    game_pk: int,
+    *,
+    path: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Return the most recently captured lineup snapshot for each side."""
+    with connect(path) as connection:
+        rows = connection.execute(
+            """
+            SELECT * FROM lineup_snapshots
+            WHERE game_pk = ?
+            ORDER BY captured_at_utc DESC
+            """,
+            (game_pk,),
+        ).fetchall()
+    result: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        side = str(row["side"])
+        if side in result:
+            continue
+        result[side] = {
+            "game_pk": int(row["game_pk"]),
+            "side": side,
+            "team_id": row["team_id"],
+            "status": str(row["status"]),
+            "captured_at_utc": str(row["captured_at_utc"]),
+            "source_hash_sha256": str(row["source_hash_sha256"]),
+            "player_ids": json.loads(str(row["player_ids_json"])),
+            "player_names": json.loads(str(row["player_names_json"])),
+            "batting_slots": json.loads(str(row["batting_slots_json"])),
+            "positions": json.loads(str(row["positions_json"])),
+        }
+    return result
+
+
 def insert_market_snapshot(
     *,
     game_id: int,
@@ -260,7 +352,7 @@ def database_summary(path: Path | None = None) -> dict[str, int | str]:
     resolved = path or research_db_path()
     with connect(resolved) as connection:
         counts = {}
-        for table in ("prediction_runs", "market_snapshots", "orders", "fills"):
+        for table in ("prediction_runs", "lineup_snapshots", "market_snapshots", "orders", "fills"):
             row = connection.execute(f"SELECT COUNT(*) AS count FROM {table}").fetchone()
             counts[table] = int(row["count"] if row is not None else 0)
     return {"path": str(resolved), **counts}
