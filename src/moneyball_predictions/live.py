@@ -437,42 +437,43 @@ async def _live_optimized_context(
     if cached and now - cached.built_at < timedelta(minutes=MODEL_CACHE_MINUTES):
         return cached
 
-    if running_on_vercel():
-        # Training the multi-season tournament during an HTTP request exceeds
-        # Hobby's function budget. Load the frozen pre-deployment artifact and
-        # only build the current-season feature state at request time.
-        bundle = load_live_model_bundle()
-        if bundle is None:
-            raise LivePredictionError(
-                "Serverless model artifact is missing; run scripts/export_serverless_artifacts.py"
-            )
+    # Always prefer the frozen deployment artifact when it includes a current-
+    # season feature engine. This avoids relying on Vercel-specific environment
+    # variables and guarantees that a request never retrains the tournament.
+    bundle = load_live_model_bundle()
+    if bundle is not None and int(bundle.get("season", season)) == season:
         artifact = bundle.get("artifact")
-        prior_summary = bundle.get("prior_summary")
-        prior_elo = bundle.get("prior_elo")
-        if artifact is None or prior_summary is None or prior_elo is None:
-            raise LivePredictionError("Serverless model artifact is incomplete")
-        current_pair = await _fetch_regular_year(client, season, through)
-    else:
-        years = [season - 4, season - 3, season - 2, season - 1]
-        historical_pairs, current_pair = await asyncio.gather(
-            asyncio.gather(*(_fetch_regular_year(client, year) for year in years)),
-            _fetch_regular_year(client, season, through),
-        )
-        historical = dict(historical_pairs)
-        preparation = prepare_model_tournament_multifold(
-            earlier_seed_games=historical[season - 4],
-            earlier_training_games=historical[season - 3],
-            earlier_validation_games=historical[season - 2],
-            seed_games=historical[season - 3],
-            training_games=historical[season - 2],
-            validation_games=historical[season - 1],
-            min_games=min_games,
-            fold_years=(season - 2, season - 1),
-        )
-        artifact = preparation.artifact
-        prior_summary = preparation.prior_summary
-        prior_elo = preparation.prior_elo
+        engine = bundle.get("engine")
+        if artifact is not None and isinstance(engine, SeasonFeatureEngine):
+            context = LiveOptimizedContext(artifact=artifact, engine=engine, built_at=now)
+            _LIVE_MODEL_CACHE[season] = context
+            return context
 
+    if running_on_vercel():
+        raise LivePredictionError(
+            "Serverless live artifact is missing its frozen season engine; "
+            "rerun scripts/export_serverless_artifacts.py and redeploy."
+        )
+
+    years = [season - 4, season - 3, season - 2, season - 1]
+    historical_pairs, current_pair = await asyncio.gather(
+        asyncio.gather(*(_fetch_regular_year(client, year) for year in years)),
+        _fetch_regular_year(client, season, through),
+    )
+    historical = dict(historical_pairs)
+    preparation = prepare_model_tournament_multifold(
+        earlier_seed_games=historical[season - 4],
+        earlier_training_games=historical[season - 3],
+        earlier_validation_games=historical[season - 2],
+        seed_games=historical[season - 3],
+        training_games=historical[season - 2],
+        validation_games=historical[season - 1],
+        min_games=min_games,
+        fold_years=(season - 2, season - 1),
+    )
+    artifact = preparation.artifact
+    prior_summary = preparation.prior_summary
+    prior_elo = preparation.prior_elo
     _, engine = build_target_rows(
         games=current_pair[1],
         prior_summary=prior_summary,
@@ -586,7 +587,7 @@ async def _bounded_live_optimized_context(
     through: date,
 ) -> LiveOptimizedContext | None:
     """Return the optimized context without allowing it to time out the board."""
-    timeout_seconds = 20.0 if running_on_vercel() else 180.0
+    timeout_seconds = 8.0 if load_live_model_bundle() is not None else (20.0 if running_on_vercel() else 180.0)
     try:
         return await asyncio.wait_for(
             _live_optimized_context(client, season=season, through=through),

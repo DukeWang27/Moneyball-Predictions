@@ -142,23 +142,27 @@ async def mlb_backtest(
     min_games: int = Query(default=10, ge=1, le=40),
 ) -> BacktestResponse:
     response.headers["Vercel-CDN-Cache-Control"] = "public, s-maxage=3600, stale-while-revalidate=86400"
+    # Prefer the precomputed default snapshot whenever it exists. This keeps the
+    # endpoint fast even when Vercel system environment variables are not
+    # exposed to the function.
+    if through is None and min_games == 10:
+        snapshot = load_backtest_snapshot(season)
+        if snapshot is not None:
+            return snapshot
     if running_on_vercel():
         if through is not None or min_games != 10:
             raise HTTPException(
                 status_code=422,
                 detail="Custom Model Lab runs are local-only; deploy a precomputed default snapshot.",
             )
-        snapshot = load_backtest_snapshot(season)
-        if snapshot is None:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "Model Lab snapshot is missing. Run "
-                    "python scripts/export_serverless_artifacts.py --season "
-                    f"{season}, then commit the generated artifacts."
-                ),
-            )
-        return snapshot
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Model Lab snapshot is missing. Run "
+                "python scripts/export_serverless_artifacts.py --season "
+                f"{season}, then commit the generated artifacts."
+            ),
+        )
     try:
         return await build_mlb_backtest(
             season=season,

@@ -14,6 +14,7 @@ import joblib
 
 from moneyball_predictions.backtest import build_mlb_backtest
 from moneyball_predictions.mlb import fetch_mlb_regular_season_schedule
+from moneyball_predictions.optimized import build_target_rows
 from moneyball_predictions.serverless_artifacts import (
     ARTIFACT_DIR,
     LIVE_MODEL_BUNDLE,
@@ -43,8 +44,15 @@ async def export_artifacts(season: int) -> None:
     headers = {"User-Agent": "Moneyball-Predictions/0.13.0 artifact-export"}
 
     print(f"Fetching training seasons: {', '.join(map(str, years))}")
+    through = datetime.now(EASTERN).date()
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
         historical_pairs = await asyncio.gather(*(_fetch_year(client, year) for year in years))
+        current_games = await fetch_mlb_regular_season_schedule(
+            client,
+            season=season,
+            start_date=date(season, 3, 1),
+            end_date=through,
+        )
 
     historical = dict(historical_pairs)
     print("Training guarded model tournament...")
@@ -58,13 +66,21 @@ async def export_artifacts(season: int) -> None:
         min_games=10,
         fold_years=(season - 2, season - 1),
     )
+    _, current_engine = build_target_rows(
+        games=current_games,
+        prior_summary=preparation.prior_summary,
+        prior_elo=preparation.prior_elo,
+        min_games=10,
+    )
     joblib.dump(
         {
             "season": season,
             "generated_at": datetime.now(EASTERN).isoformat(),
+            "engine_through": through.isoformat(),
             "artifact": preparation.artifact,
             "prior_summary": preparation.prior_summary,
             "prior_elo": preparation.prior_elo,
+            "engine": current_engine,
         },
         LIVE_MODEL_BUNDLE,
         compress=3,
